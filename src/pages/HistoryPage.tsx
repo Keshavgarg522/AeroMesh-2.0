@@ -16,6 +16,8 @@ export const HistoryPage: React.FC = () => {
   const [selectedLocation, setSelectedLocation] = useState('All Locations');
   const [selectedStatus, setSelectedStatus] = useState('All Status');
   const [sortBy, setSortBy] = useState<'latest' | 'oldest' | 'name'>('latest');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
 
   // Extract unique locations
   const locations = useMemo(() => {
@@ -28,7 +30,7 @@ export const HistoryPage: React.FC = () => {
     return ['All Locations', ...Array.from(locSet)];
   }, [historyIncidents]);
 
-  // Filter and sort incidents
+  // Filter and sort incidents based on real database fields
   const filteredIncidents = useMemo(() => {
     return historyIncidents
       .filter(inc => {
@@ -50,14 +52,23 @@ export const HistoryPage: React.FC = () => {
           selectedStatus === 'All Status' ||
           inc.status.toLowerCase() === selectedStatus.toLowerCase();
 
-        return matchesQuery && matchesLocation && matchesStatus;
+        // Real Date filter (operating on database ISO date YYYY-MM-DD)
+        const incDate = inc.date || '';
+        const matchesDate = (() => {
+          if (!startDate && !endDate) return true;
+          if (startDate && !endDate) return incDate >= startDate;
+          if (!startDate && endDate) return incDate <= endDate;
+          return incDate >= startDate && incDate <= endDate;
+        })();
+
+        return matchesQuery && matchesLocation && matchesStatus && matchesDate;
       })
       .sort((a, b) => {
         if (sortBy === 'name') return a.name.localeCompare(b.name);
-        if (sortBy === 'oldest') return a.date.localeCompare(b.date);
-        return b.date.localeCompare(a.date); // default 'latest'
+        if (sortBy === 'oldest') return (a.date || '').localeCompare(b.date || '');
+        return (b.date || '').localeCompare(a.date || ''); // default 'latest'
       });
-  }, [historyIncidents, searchQuery, selectedLocation, selectedStatus, sortBy]);
+  }, [historyIncidents, searchQuery, selectedLocation, selectedStatus, sortBy, startDate, endDate]);
 
   const handleViewAnalysis = (incident: Incident) => {
     selectIncident(incident.id);
@@ -171,15 +182,21 @@ export const HistoryPage: React.FC = () => {
               </select>
             </div>
 
-            {/* Date Range Picker (2 Cols) */}
-            <div className="lg:col-span-2 relative">
-              <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-400 pointer-events-none" />
+            {/* Real Date Range Filter: Start & End (Database YYYY-MM-DD) */}
+            <div className="lg:col-span-2 flex items-center gap-1">
               <input
-                type="text"
-                readOnly
-                value="Select Date Range"
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0b1429] border border-[#182d5a] text-xs text-slate-400 cursor-pointer"
-                title="Date range filter"
+                type="date"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                title="Start Date"
+                className="w-1/2 px-2 py-2 rounded-xl bg-[#0b1429] border border-[#182d5a] focus:border-cyan-400 text-[11px] text-slate-300 focus:outline-none"
+              />
+              <input
+                type="date"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                title="End Date"
+                className="w-1/2 px-2 py-2 rounded-xl bg-[#0b1429] border border-[#182d5a] focus:border-cyan-400 text-[11px] text-slate-300 focus:outline-none"
               />
             </div>
 

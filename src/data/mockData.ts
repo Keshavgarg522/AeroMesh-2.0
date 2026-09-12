@@ -194,85 +194,85 @@ export const historyIncidents: Incident[] = [
 
 export const defaultMarkings: CustomMarking[] = [
   {
-    id: 'mark-mountain',
+    id: 'mk-mountain',
     name: 'Mountain',
-    type: 'Landmark',
-    color: '#10b981',
-    description: 'Northern ridge elevation',
+    type: 'Custom',
+    color: '#22c55e',
+    description: 'Mountain terrain zone',
     visible: true,
-    position: [-5.0, 3.5, -7.5],
-    iconType: 'mountain'
+    position: [-12, 2.5, -14],
+    iconType: 'mountain',
   },
   {
-    id: 'mark-docheck',
+    id: 'mk-docheck1',
     name: 'Docheck Point 1',
     type: 'Entry Point',
     color: '#f59e0b',
-    description: 'Bridge western approach checkpoint',
+    description: 'Primary checkpoint location',
     visible: true,
-    position: [-4.2, 1.2, -1.8],
-    iconType: 'pin'
+    position: [-4.2, 1.8, -1.8],
+    iconType: 'pin',
   },
   {
-    id: 'mark-fire',
+    id: 'mk-fire-major',
     name: 'Fire Major',
     type: 'Hazard',
     color: '#ef4444',
-    description: 'Vehicle fuel ignition on western deck',
+    description: 'Major fire incident zone',
     visible: true,
-    position: [-2.0, 1.5, 0.2],
-    iconType: 'fire'
+    position: [-2.0, 2.2, 0.2],
+    iconType: 'fire',
   },
   {
-    id: 'mark-rubble',
+    id: 'mk-rubble',
     name: 'Rubble Zone',
     type: 'Damage',
-    color: '#ef4444',
-    description: 'Collapsed superstructure debris on central span',
+    color: '#f97316',
+    description: 'Structural rubble and debris area',
     visible: true,
-    position: [0.2, 1.1, 1.1],
-    iconType: 'warning'
+    position: [1.0, 1.8, 1.2],
+    iconType: 'warning',
   },
   {
-    id: 'mark-shelter',
+    id: 'mk-shelter',
     name: 'Shelter Area',
     type: 'Temporary shelter',
     color: '#a855f7',
-    description: 'Triage and casualty holding staging area',
+    description: 'Emergency shelter zone',
     visible: true,
-    position: [2.5, 0.9, 1.8],
-    iconType: 'shelter'
+    position: [2.5, 1.6, 1.8],
+    iconType: 'shelter',
   },
   {
-    id: 'mark-entry-exit',
+    id: 'mk-entry-exit',
     name: 'Entry / Exit',
     type: 'Entry Point',
     color: '#10b981',
-    description: 'Eastern clearance corridor',
+    description: 'Entry and exit control point',
     visible: true,
-    position: [5.2, 0.5, 3.0],
-    iconType: 'pin'
+    position: [6.0, 1.6, 3.2],
+    iconType: 'pin',
   },
   {
-    id: 'mark-water',
-    name: 'Water',
-    type: 'Water',
-    color: '#00d2ff',
-    description: 'Waterway channel depth 14m',
-    visible: true,
-    position: [-2.8, -1.2, 4.2],
-    iconType: 'water'
-  },
-  {
-    id: 'mark-boat',
+    id: 'mk-boat',
     name: 'Boat',
     type: 'Custom',
-    color: '#00d2ff',
-    description: 'Emergency rescue patrol vessel',
+    color: '#06b6d4',
+    description: 'Boat / water vessel position',
     visible: true,
-    position: [-1.4, -1.0, 5.4],
-    iconType: 'boat'
-  }
+    position: [-1.5, -2.5, 4.0],
+    iconType: 'boat',
+  },
+  {
+    id: 'mk-water',
+    name: 'Water',
+    type: 'Custom',
+    color: '#3b82f6',
+    description: 'Water channel zone',
+    visible: true,
+    position: [-5.0, -2.5, 4.5],
+    iconType: 'water',
+  },
 ];
 
 export const defaultFilterState: FilterState = {
@@ -284,12 +284,14 @@ export const defaultFilterState: FilterState = {
   damage: true,
   labels: true,
   customMarkings: {
-    'Boat': true,
-    'Water': true,
     'Mountain': true,
     'Docheck Point 1': true,
+    'Fire Major': true,
     'Rubble Zone': true,
     'Shelter Area': true,
+    'Entry / Exit': true,
+    'Boat': true,
+    'Water': true,
   }
 };
 

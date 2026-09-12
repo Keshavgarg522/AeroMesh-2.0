@@ -161,30 +161,36 @@ export const DashboardFilters: React.FC<DashboardFiltersProps> = ({
 
           {isCustomExpanded && (
             <div className="mt-2 space-y-2 pl-1">
-              {markings.map((m) => {
-                const isChecked = filters.customMarkings[m.name] !== false && m.visible !== false;
-                return (
-                  <div key={m.id} className="flex items-center justify-between py-0.5">
-                    <div className="flex items-center gap-2 text-[11px] text-slate-300 truncate max-w-[130px]">
-                      <span 
-                        className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: m.color }}
-                      />
-                      <span className="truncate">{m.name}</span>
-                    </div>
+              {markings.filter(m => !m.isSystem).length === 0 ? (
+                <p className="text-[10px] text-slate-500 italic py-1">No custom markings yet</p>
+              ) : (
+                markings
+                  .filter(m => !m.isSystem)
+                  .map((m) => {
+                    const isChecked = filters.customMarkings[m.name] !== false && m.visible !== false;
+                    return (
+                      <div key={m.id} className="flex items-center justify-between py-0.5">
+                        <div className="flex items-center gap-2 text-[11px] text-slate-300 truncate max-w-[130px]">
+                          <span 
+                            className="w-2 h-2 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: m.color }}
+                          />
+                          <span className="truncate">{m.name}</span>
+                        </div>
 
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={(e) => onToggleCustomMarking(m.name, e.target.checked)}
-                        className="sr-only peer"
-                      />
-                      <div className="w-8 h-4 bg-[#132142] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-blue-600 shadow-inner"></div>
-                    </label>
-                  </div>
-                );
-              })}
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => onToggleCustomMarking(m.name, e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-8 h-4 bg-[#132142] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-blue-600 shadow-inner"></div>
+                        </label>
+                      </div>
+                    );
+                  })
+              )}
             </div>
           )}
         </div>

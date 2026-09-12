@@ -22,3 +22,33 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.env
+.venv
+venv/
+env/
+*.egg-info/
+
+# Database
+aeromesh.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Large ML model weights
+*.pt
+*.pth
+*.weights
+*.onnx
+
+# Storage / uploads / generated models
+storage/
+scratch/
+
+# OS
+Thumbs.db

@@ -1,44 +1,30 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  Play, Clock, User, Copy, Check, MapPin, Crosshair,
-  UploadCloud, FileVideo, Trash2, RefreshCw, AlertCircle, Bookmark, Volume2, Maximize
+  Play, Clock, User, MapPin, Crosshair,
+  UploadCloud, FileVideo, Trash2, RefreshCw, AlertCircle, Bookmark, Volume2, Maximize, Loader2
 } from 'lucide-react';
 import { useIncident } from '../context/IncidentContext';
+import { api } from '../services/api';
 
 export const NewAnalysisPage: React.FC = () => {
   const navigate = useNavigate();
-  const { setIncident, setVideoFile, videoBlobUrl, videoMeta, extraction } = useIncident();
+  const { setIncident, setVideoFile, videoFile, videoBlobUrl, videoMeta, extraction } = useIncident();
 
   // Form states
-  const [incidentId] = useState<string>(() => {
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    return `AM-${yyyy}${mm}${dd}-001`;
-  });
-  const [title, setTitle] = useState<string>('Building Collapse Incident');
+  const [title, setTitle] = useState<string>('Bridge Inspection Analysis');
   const [location, setLocation] = useState<string>('Sector 62, Noida, Uttar Pradesh');
   const [description, setDescription] = useState<string>(
-    'A multi-storey building has partially collapsed. Need to analyze the structure and assess the damage using drone footage.'
+    'Drone aerial survey of bridge superstructure and roadway perimeter for structural integrity assessment.'
   );
-  const [date, setDate] = useState<string>('2025-09-08');
-  const [time, setTime] = useState<string>('10:24 AM');
 
   // Local file display state (name + size for UI)
   const [localVideoMeta, setLocalVideoMeta] = useState<{ name: string; size: string } | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [copiedId, setCopiedId] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
-
-  const handleCopyId = () => {
-    navigator.clipboard.writeText(incidentId);
-    setCopiedId(true);
-    setTimeout(() => setCopiedId(false), 2000);
-  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -66,8 +52,6 @@ export const NewAnalysisPage: React.FC = () => {
     setTitle('');
     setLocation('');
     setDescription('');
-    setDate('');
-    setTime('');
     setLocalVideoMeta(null);
     setIsPlaying(false);
     setVideoFile(null);
@@ -75,12 +59,11 @@ export const NewAnalysisPage: React.FC = () => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleStartAnalysis = () => {
+  const handleStartAnalysis = async () => {
     const errors: { [key: string]: string } = {};
     if (!title.trim()) errors.title = 'Name / Title is required';
     if (!location.trim()) errors.location = 'Location is required';
     if (!description.trim()) errors.description = 'Description is required';
-    if (!date) errors.date = 'Date is required';
     if (!localVideoMeta) errors.video = 'Please upload a drone video before starting analysis';
 
     if (Object.keys(errors).length > 0) {
@@ -88,22 +71,39 @@ export const NewAnalysisPage: React.FC = () => {
       return;
     }
 
-    // Save incident metadata to context
-    setIncident(prev => ({
-      ...prev,
-      id: incidentId,
-      name: title,
-      location,
-      description,
-      date,
-      time,
-      status: 'Analysis Completed',
-      videoName: localVideoMeta?.name,
-      videoSize: localVideoMeta?.size,
-      // videoObjectUrl, videoDuration, videoResolution are set by setVideoFile in context
-    }));
+    setIsSubmitting(true);
+    try {
+      // 1. Create incident on real backend — backend generates collision-safe ID and immutable UTC timestamp
+      const created = await api.createIncident({
+        name: title,
+        location,
+        description,
+      });
 
-    navigate('/dashboard');
+      // 2. Upload video file to backend if selected
+      if (videoFile) {
+        await api.uploadVideo(created.id, videoFile);
+        await api.startAnalysis(created.id);
+      }
+
+      setIncident(created);
+      navigate('/dashboard');
+    } catch (err) {
+      console.warn('[AeroMesh API] Starting with local workflow:', err);
+      // Fallback
+      setIncident(prev => ({
+        ...prev,
+        name: title,
+        location,
+        description,
+        status: 'In Progress',
+        videoName: localVideoMeta?.name,
+        videoSize: localVideoMeta?.size,
+      }));
+      navigate('/dashboard');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Helper to render extraction status in the video preview area
@@ -217,7 +217,7 @@ export const NewAnalysisPage: React.FC = () => {
                     </p>
                   </div>
                   <div className="px-3 py-1 rounded-md bg-[#0c1630] border border-cyan-500/40 text-cyan-400 font-mono text-xs font-semibold shadow-[0_0_10px_rgba(0,210,255,0.15)]">
-                    ID: {incidentId}
+                    ID: Auto-Assigned by Backend
                   </div>
                 </div>
 
@@ -304,30 +304,17 @@ export const NewAnalysisPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* Date & Time */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-300 flex items-center gap-1">
-                      Date <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="date"
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-[#0b1328] border border-[#1b2f5b] focus:border-cyan-400 text-sm text-white focus:outline-none"
-                    />
+                {/* Creation Timestamp: Automatically generated by backend (Immutable) */}
+                <div className="p-3.5 rounded-xl bg-[#091124] border border-[#14254b] flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <Clock className="w-4 h-4 text-cyan-400" />
+                    <div>
+                      <p className="font-semibold text-slate-200">Creation Timestamp</p>
+                      <p className="text-[11px] text-slate-400">Server-generated in UTC · Immutable audit record</p>
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-300 flex items-center gap-1">
-                      Time
-                    </label>
-                    <input
-                      type="text"
-                      value={time}
-                      onChange={(e) => setTime(e.target.value)}
-                      placeholder="e.g. 10:24 AM"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-[#0b1328] border border-[#1b2f5b] focus:border-cyan-400 text-sm text-white focus:outline-none"
-                    />
+                  <div className="px-2.5 py-1 rounded-md bg-blue-950/60 border border-cyan-400/40 text-cyan-300 font-mono text-xs font-semibold">
+                    Automatic Server Timestamp
                   </div>
                 </div>
               </div>
@@ -480,11 +467,21 @@ export const NewAnalysisPage: React.FC = () => {
                   {/* Start Analysis Button */}
                   <button
                     type="button"
+                    disabled={isSubmitting}
                     onClick={handleStartAnalysis}
-                    className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-sm shadow-[0_0_20px_rgba(0,210,255,0.4)] hover:shadow-[0_0_30px_rgba(0,210,255,0.6)] transition-all duration-300 transform hover:-translate-y-0.5"
+                    className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 disabled:opacity-60 text-white font-semibold text-sm shadow-[0_0_20px_rgba(0,210,255,0.4)] hover:shadow-[0_0_30px_rgba(0,210,255,0.6)] transition-all duration-300 transform hover:-translate-y-0.5 cursor-pointer"
                   >
-                    <Play className="w-4 h-4 fill-white text-white" />
-                    <span>Start Analysis</span>
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                        <span>Initializing Vision Pipeline...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 fill-white text-white" />
+                        <span>Start Analysis</span>
+                      </>
+                    )}
                   </button>
                 </div>
 
@@ -502,17 +499,7 @@ export const NewAnalysisPage: React.FC = () => {
                 <div className="space-y-3.5 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Incident ID</span>
-                    <div className="flex items-center gap-1.5 font-mono text-slate-200">
-                      <span>{incidentId}</span>
-                      <button
-                        type="button"
-                        onClick={handleCopyId}
-                        className="text-slate-400 hover:text-cyan-400 p-0.5"
-                        title="Copy Incident ID"
-                      >
-                        {copiedId ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
+                    <span className="font-mono text-cyan-400 text-[11px]">Assigned upon creation</span>
                   </div>
 
                   <div className="flex items-start justify-between gap-2">
@@ -526,8 +513,8 @@ export const NewAnalysisPage: React.FC = () => {
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Date &amp; Time</span>
-                    <span className="text-slate-200 font-mono">{date ? `${date} ${time}` : '—'}</span>
+                    <span className="text-slate-400">Creation Timestamp</span>
+                    <span className="text-slate-200 font-mono text-[11px]">Server UTC (Immutable)</span>
                   </div>
 
                   {/* Real video metadata if available */}

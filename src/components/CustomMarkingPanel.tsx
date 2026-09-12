@@ -1,19 +1,34 @@
 import React, { useState } from 'react';
-import { MapPin, Eye, EyeOff, Trash2, Plus, ChevronDown, ChevronUp } from 'lucide-react';
-import type { CustomMarking, MarkingType } from '../types';
+import { MapPin, Eye, EyeOff, Trash2, ChevronDown, ChevronUp, Move, Loader2 } from 'lucide-react';
+import type { CustomMarking, MarkingType, PendingMarkingData } from '../types';
 
 interface CustomMarkingPanelProps {
   markings: CustomMarking[];
-  onAddMarking: (marking: Omit<CustomMarking, 'id'>) => void;
+  onAddMarking?: (marking: Omit<CustomMarking, 'id'>) => void;
   onDeleteMarking: (id: string) => void;
   onToggleVisibility: (id: string) => void;
+  /** Requests the DashboardPage to enter placement mode with the given form data */
+  onRequestPlacement?: (data: PendingMarkingData) => void;
+  /** Requests reposition mode for an existing marking */
+  onRequestReposition?: (id: string) => void;
+  /** Cancels the current placement / reposition mode */
+  onCancelPlacement?: () => void;
+  /** True when the viewer is waiting for a placement click */
+  placementMode?: boolean;
+  /** ID of the marking being repositioned (if any) */
+  repositioningId?: string | null;
 }
 
 export const CustomMarkingPanel: React.FC<CustomMarkingPanelProps> = ({
   markings,
-  onAddMarking,
+  onAddMarking: _onAddMarking,
   onDeleteMarking,
-  onToggleVisibility
+  onToggleVisibility,
+  onRequestPlacement,
+  onRequestReposition,
+  onCancelPlacement,
+  placementMode = false,
+  repositioningId = null,
 }) => {
   const [name, setName] = useState<string>('');
   const [type, setType] = useState<MarkingType | ''>('');
@@ -29,24 +44,19 @@ export const CustomMarkingPanel: React.FC<CustomMarkingPanelProps> = ({
     { label: 'Purple', value: '#a855f7' },
   ];
 
-  const handleAdd = (e: React.FormEvent) => {
+  const handleRequestPlace = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
-    // Pick random plausible bridge position for newly added custom marking
-    const rx = (Math.random() - 0.5) * 6;
-    const rz = (Math.random() - 0.5) * 8;
-
-    onAddMarking({
+    // Send form data to DashboardPage — it will enter placement mode
+    onRequestPlacement?.({
       name: name.trim(),
       type: (type as MarkingType) || 'Custom',
-      color: color,
+      color,
       description: description.trim(),
-      visible: true,
-      position: [rx, 1.2, rz],
-      iconType: type === 'Hazard' ? 'fire' : type === 'Damage' ? 'warning' : 'pin'
     });
 
+    // Clear form after sending
     setName('');
     setType('');
     setDescription('');
@@ -71,9 +81,49 @@ export const CustomMarkingPanel: React.FC<CustomMarkingPanelProps> = ({
           </button>
         </div>
 
-        {/* Add Marking Form */}
-        {isAddExpanded && (
-          <form onSubmit={handleAdd} className="space-y-3">
+        {/* ── Placement-In-Progress Banner ── */}
+        {placementMode && !repositioningId && (
+          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-400/40 animate-pulse">
+            <div className="flex items-center gap-2 mb-1.5">
+              <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+              <span className="text-[11px] font-bold text-amber-300">Waiting for map click…</span>
+            </div>
+            <p className="text-[10px] text-amber-400/70 mb-2">
+              Click anywhere on the 3D scene to place your marking. Press ESC to cancel.
+            </p>
+            <button
+              type="button"
+              onClick={() => onCancelPlacement?.()}
+              className="w-full py-1.5 rounded-md bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 text-[11px] font-semibold transition-colors border border-amber-400/30"
+            >
+              Cancel Placement
+            </button>
+          </div>
+        )}
+
+        {/* ── Repositioning Banner ── */}
+        {placementMode && repositioningId && (
+          <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-400/40 animate-pulse">
+            <div className="flex items-center gap-2 mb-1.5">
+              <Move className="w-3.5 h-3.5 text-purple-400" />
+              <span className="text-[11px] font-bold text-purple-300">Moving marking…</span>
+            </div>
+            <p className="text-[10px] text-purple-400/70 mb-2">
+              Click a new location on the 3D scene. Press ESC to cancel.
+            </p>
+            <button
+              type="button"
+              onClick={() => onCancelPlacement?.()}
+              className="w-full py-1.5 rounded-md bg-purple-400/15 hover:bg-purple-400/25 text-purple-300 text-[11px] font-semibold transition-colors border border-purple-400/30"
+            >
+              Cancel Move
+            </button>
+          </div>
+        )}
+
+        {/* Add Marking Form — hidden during placement */}
+        {isAddExpanded && !placementMode && (
+          <form onSubmit={handleRequestPlace} className="space-y-3">
             {/* Marking Name */}
             <div className="space-y-1">
               <label className="text-[11px] font-semibold text-slate-300">
@@ -144,29 +194,40 @@ export const CustomMarkingPanel: React.FC<CustomMarkingPanelProps> = ({
               />
             </div>
 
-            {/* Submit Button */}
+            {/* Submit — triggers placement mode, NOT instant add */}
             <button
               type="submit"
               disabled={!name.trim()}
-              className="w-full py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-xs transition-colors shadow-[0_0_12px_rgba(37,99,235,0.4)] flex items-center justify-center gap-1.5"
+              className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 disabled:opacity-50 disabled:from-amber-800 disabled:to-orange-800 text-white font-semibold text-xs transition-all shadow-[0_0_16px_rgba(245,158,11,0.3)] flex items-center justify-center gap-1.5"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Marking</span>
+              <MapPin className="w-3.5 h-3.5" />
+              <span>Place on Map →</span>
             </button>
           </form>
         )}
 
-        {/* Saved Markings List (Screenshot 4) */}
+        {/* Saved Markings List — User-Created Only */}
         <div className="pt-2 border-t border-[#132244]">
           <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-            Saved Markings
+            My Custom Markings
           </h4>
 
           <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-            {markings.map((m) => (
+            {markings.filter(m => !m.isSystem).length === 0 && (
+              <p className="text-[11px] text-slate-600 italic text-center py-3">
+                No custom markings yet. Add one above.
+              </p>
+            )}
+            {markings
+              .filter(m => !m.isSystem)
+              .map((m) => (
               <div
                 key={m.id}
-                className="p-2 rounded-lg bg-[#0a1326] border border-[#172a54] flex items-center justify-between group hover:border-cyan-500/40 transition-colors"
+                className={`p-2 rounded-lg bg-[#0a1326] border flex items-center justify-between group transition-colors ${
+                  repositioningId === m.id
+                    ? 'border-purple-400/60 bg-purple-500/10'
+                    : 'border-[#172a54] hover:border-cyan-500/40'
+                }`}
               >
                 <div className="flex items-center gap-2 overflow-hidden">
                   <span 
@@ -189,11 +250,23 @@ export const CustomMarkingPanel: React.FC<CustomMarkingPanelProps> = ({
                     {m.visible ? <Eye className="w-3.5 h-3.5 text-cyan-400" /> : <EyeOff className="w-3.5 h-3.5 text-slate-600" />}
                   </button>
 
+                  {/* Move / Reposition button */}
+                  <button
+                    type="button"
+                    onClick={() => onRequestReposition?.(m.id)}
+                    disabled={placementMode}
+                    className="p-1 text-slate-400 hover:text-purple-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Move to new location"
+                  >
+                    <Move className="w-3.5 h-3.5" />
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => onDeleteMarking(m.id)}
-                    className="p-1 text-slate-400 hover:text-rose-400 transition-colors"
-                    title="Delete marking"
+                    disabled={placementMode}
+                    className="p-1 text-slate-400 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Delete custom marking"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

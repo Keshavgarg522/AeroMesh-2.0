@@ -32,6 +32,7 @@ export interface Incident {
   detectedConditions?: DetectedConditions;
   overallCondition?: OverallCondition;
   keyObservations?: string[];
+  reconstruction_glb_url?: string;
 }
 
 export type MarkingType =
@@ -43,6 +44,14 @@ export type MarkingType =
   | 'Water'
   | 'Custom';
 
+/** Form data collected BEFORE the user clicks to choose a 3D location. */
+export interface PendingMarkingData {
+  name: string;
+  type: MarkingType | '';
+  color: string;
+  description: string;
+}
+
 export interface CustomMarking {
   id: string;
   name: string;
@@ -52,6 +61,7 @@ export interface CustomMarking {
   visible: boolean;
   position: [number, number, number]; // 3D coordinates in scene
   iconType?: 'pin' | 'fire' | 'warning' | 'shelter' | 'boat' | 'mountain' | 'water';
+  isSystem?: boolean; // True for system-generated detections; false for user-created markings
 }
 
 export interface FilterState {
@@ -113,4 +123,27 @@ export interface VideoMeta {
   height: number;
   resolutionFormatted: string;
   fps?: number | null;     // real FPS if parsed from container; null if not determinable
+}
+
+export interface ReconstructionAnnotation {
+  id: string;
+  track_id: number;
+  annotation_type: string;
+  label: string;
+  position: [number, number, number];
+  confidence: number;
+  mapping_confidence: number;
+  source_frame_numbers: number[];
+}
+
+export interface ReconstructionData {
+  id: string;
+  incident_id: string;
+  model_glb_url: string;
+  point_count: number;
+  camera_count: number;
+  observed_percentage: number;
+  reconstructed_percentage: number;
+  inferred_percentage: number;
+  reconstruction_quality: string;
 }

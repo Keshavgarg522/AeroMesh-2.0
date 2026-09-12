@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
 import { IncidentProvider, useIncident } from './context/IncidentContext';
 import { Navbar } from './components/Navbar';
 import { HomePage } from './pages/HomePage';
@@ -43,11 +44,13 @@ function AppContent() {
 
 export function App() {
   return (
-    <IncidentProvider>
-      <Router>
-        <AppContent />
-      </Router>
-    </IncidentProvider>
+    <AuthProvider>
+      <IncidentProvider>
+        <Router>
+          <AppContent />
+        </Router>
+      </IncidentProvider>
+    </AuthProvider>
   );
 }
 

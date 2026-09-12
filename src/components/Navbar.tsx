@@ -2,12 +2,15 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Bell, ChevronDown, FileText, Download, User, Home as HomeIcon, Sparkles } from 'lucide-react';
 import { useIncident } from '../context/IncidentContext';
+import { useAuth } from '../context/AuthContext';
 
 export const Navbar: React.FC = () => {
   const location = useLocation();
   const { incident, openReport, downloadReport } = useIncident();
+  const { user } = useAuth();
   const path = location.pathname;
 
+  const displayName = user?.name ? user.name.split(' ')[0] : 'Keshav';
   const isDashboard = path === '/dashboard' || path.startsWith('/analysis');
   const isNewAnalysis = path === '/new-analysis';
 
@@ -179,7 +182,7 @@ export const Navbar: React.FC = () => {
                 <div className="w-6 h-6 rounded-full bg-blue-600/40 border border-cyan-400/50 flex items-center justify-center text-cyan-300 font-bold text-xs">
                   <User className="w-3.5 h-3.5" />
                 </div>
-                <span className="text-xs font-semibold text-slate-200">Keshav</span>
+                <span className="text-xs font-semibold text-slate-200">{displayName}</span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
               </Link>
             </div>

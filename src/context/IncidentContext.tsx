@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import type { Incident, CustomMarking, FilterState, IncidentStats, VideoFrame, VideoMeta } from '../types';
 import { initialIncident, historyIncidents as defaultHistory, defaultMarkings, defaultFilterState, defaultIncidentStats } from '../data/mockData';
 import { extractFramesFromFile, getDemoFrames, type ExtractionProgress } from '../utils/frameExtractor';
 import { downloadIncidentReport } from '../utils/reportGenerator';
+import { api } from '../services/api';
 
 // ─── Extraction State ────────────────────────────────────────────────────────
 export type ExtractionStatus = 'idle' | 'extracting' | 'done' | 'error';
@@ -26,6 +27,7 @@ interface IncidentContextType {
   addMarking: (marking: Omit<CustomMarking, 'id'>) => void;
   deleteMarking: (id: string) => void;
   toggleMarkingVisibility: (id: string) => void;
+  updateMarkingPosition: (id: string, position: [number, number, number]) => void;
 
   // Filters
   filters: FilterState;
@@ -48,6 +50,7 @@ interface IncidentContextType {
 
   // ── Extracted Frames ──────────────────────────────────────────────────────
   frames: VideoFrame[];
+  setFrames: React.Dispatch<React.SetStateAction<VideoFrame[]>>;
   selectedFrame: VideoFrame | null;
   setSelectedFrame: (frame: VideoFrame | null) => void;
   reloadFrames: () => void;
@@ -64,6 +67,7 @@ interface IncidentContextType {
 
   // ── Incident helper ───────────────────────────────────────────────────────
   createNewIncident: (data: Partial<Incident>) => string;
+  refreshIncident: (id: string) => Promise<Incident | null>;
 }
 
 // ─── Context ─────────────────────────────────────────────────────────────────
@@ -107,6 +111,24 @@ export const IncidentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Track active extraction aborts
   const extractionAbortRef = useRef<boolean>(false);
 
+  // Fetch real incidents from backend on mount
+  useEffect(() => {
+    const fetchIncidents = async () => {
+      try {
+        const backendIncidents = await api.listIncidents();
+        if (backendIncidents && backendIncidents.length > 0) {
+          setHistoryList(backendIncidents);
+          setIncident(backendIncidents[0]);
+          if (backendIncidents[0].stats) setStats(backendIncidents[0].stats);
+        }
+      } catch (err) {
+        // Graceful fallback to initial mock data if backend not yet running
+        console.log('[AeroMesh API] Initializing with local data:', err);
+      }
+    };
+    fetchIncidents();
+  }, []);
+
   /** Open the Analysis Report modal */
   const openReport = useCallback((inc?: Incident) => {
     setReportTarget(inc || incident);
@@ -118,30 +140,77 @@ export const IncidentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setIsReportModalOpen(false);
   }, []);
 
-  /** Download report directly */
+  /** Download report directly — uses official backend PDF when available */
   const downloadReport = useCallback((inc?: Incident) => {
-    downloadIncidentReport(inc || incident);
+    const target = inc || incident;
+    try {
+      const downloadUrl = api.getDownloadReportUrl(target.id);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `AeroMesh_${target.id}_Report.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch {
+      // Fallback to client-side jsPDF
+      downloadIncidentReport(target);
+    }
   }, [incident]);
 
+  /** Refresh incident from backend API */
+  const refreshIncident = useCallback(async (id: string): Promise<Incident | null> => {
+    try {
+      const fresh = await api.getIncident(id);
+      if (fresh) {
+        setIncident(fresh);
+        setHistoryList(prev => {
+          const idx = prev.findIndex(item => item.id === id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = fresh;
+            return next;
+          }
+          return [fresh, ...prev];
+        });
+        if (fresh.stats) setStats(fresh.stats);
+        return fresh;
+      }
+    } catch (err) {
+      console.warn('[AeroMesh API] Failed to refresh incident:', err);
+    }
+    return null;
+  }, []);
+
   /** Select an incident from history */
-  const selectIncident = useCallback((id: string) => {
+  const selectIncident = useCallback(async (id: string) => {
     const found = historyList.find(item => item.id === id);
-    if (!found) return;
-    setIncident(found);
-    if (found.stats) setStats(found.stats);
+    if (found) {
+      setIncident(found);
+      if (found.stats) setStats(found.stats);
+    }
+
+    try {
+      const fresh = await api.getIncident(id);
+      if (fresh) {
+        setIncident(fresh);
+        if (fresh.stats) setStats(fresh.stats);
+      }
+    } catch {
+      // offline fallback
+    }
 
     // Load corresponding frames & video
-    const newDemoFrames = getDemoFrames(found.id);
+    const newDemoFrames = getDemoFrames(found?.id || id);
     setFrames(newDemoFrames);
     setSelectedFrame(newDemoFrames[0] ?? null);
-    setVideoBlobUrl(found.videoObjectUrl || '/assets/drone_sample.mp4');
+    setVideoBlobUrl(found?.videoObjectUrl || '/assets/drone_sample.mp4');
     setVideoMeta({
       duration: 53.9,
-      durationFormatted: found.videoDuration || '00:53',
+      durationFormatted: found?.videoDuration || '00:53',
       width: 1920,
       height: 1080,
-      resolutionFormatted: found.videoResolution || '1920 × 1080',
-      fps: found.videoFps || 12,
+      resolutionFormatted: found?.videoResolution || '1920 × 1080',
+      fps: found?.videoFps || 12,
     });
     setExtraction({
       status: 'done',
@@ -276,17 +345,33 @@ export const IncidentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // ─── Markings ─────────────────────────────────────────────────────────────
   const addMarking = (newMarking: Omit<CustomMarking, 'id'>) => {
-    const id = 'mark-' + Date.now();
-    const created: CustomMarking = { ...newMarking, id };
+    const id = 'user-mark-' + Date.now();
+    const created: CustomMarking = { ...newMarking, id, isSystem: false };
     setMarkings(prev => [...prev, created]);
     setFilters(prev => ({
       ...prev,
       customMarkings: { ...prev.customMarkings, [created.name]: true },
     }));
+
+    // Synchronize to backend database
+    if (incident?.id) {
+      api.addMarking(incident.id, {
+        name: created.name,
+        type: created.type,
+        color: created.color,
+        description: created.description,
+        position: created.position,
+      }).catch(err => console.log('[AeroMesh API] Marking stored locally:', err));
+    }
   };
 
   const deleteMarking = (id: string) => {
     const target = markings.find(m => m.id === id);
+    // CRITICAL FIX: Never delete system-generated markings (Entry/Exit, Fire, Damage, etc.)
+    // Only user-created custom markings can be deleted.
+    if (target?.isSystem) {
+      return;
+    }
     setMarkings(prev => prev.filter(m => m.id !== id));
     if (target) {
       setFilters(prev => {
@@ -295,6 +380,9 @@ export const IncidentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return { ...prev, customMarkings: next };
       });
     }
+
+    // Synchronize deletion to backend database
+    api.deleteMarking(id).catch(() => {});
   };
 
   const toggleMarkingVisibility = (id: string) => {
@@ -313,6 +401,24 @@ export const IncidentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   };
 
+  /**
+   * Move a user-created marking to a new 3D position.
+   * System-generated markings are completely protected and cannot be moved.
+   */
+  const updateMarkingPosition = (id: string, position: [number, number, number]) => {
+    setMarkings(prev =>
+      prev.map(m => {
+        if (m.id === id && !m.isSystem) {
+          return { ...m, position };
+        }
+        return m;
+      })
+    );
+
+    // Synchronize position to backend database
+    api.updateMarkingPosition(id, position).catch(() => {});
+  };
+
   // ─── Filters ──────────────────────────────────────────────────────────────
   const setFilter = (key: keyof Omit<FilterState, 'customMarkings'>, val: boolean) => {
     setFilters(prev => ({ ...prev, [key]: val }));
@@ -325,53 +431,65 @@ export const IncidentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const resetFilters = () => {
     setFilters(defaultFilterState);
-    setMarkings(defaultMarkings);
+    setMarkings(prev => {
+      const userCustom = prev.filter(m => !m.isSystem);
+      return [...defaultMarkings, ...userCustom];
+    });
   };
 
   // ─── Incident helper ──────────────────────────────────────────────────────
   const createNewIncident = (data: Partial<Incident>): string => {
+    // Generate fallback or optimistic ID
     const today = new Date();
     const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    const randomSeq = String(Math.floor(Math.random() * 900) + 100);
-    const newId = `AM-${yyyy}${mm}${dd}-${randomSeq}`;
+    const randomSeq = String(Math.floor(Math.random() * 900000) + 100000);
+    const newId = `AM-${yyyy}-${randomSeq}`;
 
     const newInc: Incident = {
       id: newId,
       name: data.name || 'Untitled Incident',
       location: data.location || 'Unknown Location',
       description: data.description || '',
-      date: data.date || `${yyyy}-${mm}-${dd}`,
+      date: data.date || today.toISOString().split('T')[0],
       time: data.time || '10:00 AM',
-      status: 'Analysis Completed',
+      status: 'Pending',
       thumbnailUrl: '/assets/drone_bridge_aerial.jpg',
       videoName: data.videoName,
       videoSize: data.videoSize,
       videoObjectUrl: data.videoObjectUrl,
       stats: defaultIncidentStats,
       detectedConditions: {
-        structuralDamage: true,
-        fire: true,
-        smoke: true,
-        humanPresence: true,
-        vehiclePresence: true,
-        entryExit: true,
+        structuralDamage: false,
+        fire: false,
+        smoke: false,
+        humanPresence: false,
+        vehiclePresence: false,
+        entryExit: false,
       },
       overallCondition: {
-        level: 'CRITICAL',
-        title: 'CRITICAL - Immediate attention recommended',
-        description: 'The analysed scene indicates significant structural damage with active fire activity. Area should be secured.',
+        level: 'UNKNOWN',
+        title: 'Pending Assessment',
+        description: 'Awaiting video analysis and photogrammetry reconstruction.',
       },
-      keyObservations: [
-        'Structural damage detected by drone aerial survey.',
-        'Human presence and vehicles isolated in sector.',
-        'Reconnaissance data logged into AeroMesh records.',
-      ],
+      keyObservations: [],
     };
 
+    // Save to local context state immediately for responsive UI
     setIncident(newInc);
     setHistoryList(prev => [newInc, ...prev]);
+
+    // Asynchronously register in backend database so unique ID & immutable timestamp are created
+    api.createIncident({
+      name: newInc.name,
+      location: newInc.location,
+      description: newInc.description,
+    }).then(backendInc => {
+      setIncident(backendInc);
+      setHistoryList(prev => prev.map(item => item.id === newId ? backendInc : item));
+    }).catch(err => {
+      console.log('[AeroMesh API] Operating in offline mode:', err);
+    });
+
     return newId;
   };
 
@@ -386,6 +504,7 @@ export const IncidentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addMarking,
         deleteMarking,
         toggleMarkingVisibility,
+        updateMarkingPosition,
         filters,
         setFilter,
         setCustomMarkingFilter,
@@ -396,6 +515,7 @@ export const IncidentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         videoMeta,
         setVideoFile,
         frames,
+        setFrames,
         selectedFrame,
         setSelectedFrame,
         reloadFrames,
@@ -406,6 +526,7 @@ export const IncidentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         closeReport,
         downloadReport,
         createNewIncident,
+        refreshIncident,
       }}
     >
       {children}
