@@ -4,7 +4,7 @@ from sqlalchemy import (
     Column, String, Integer, Float, BigInteger, Boolean, DateTime,
     ForeignKey, Text, JSON
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, foreign
 from backend.database import Base
 
 def utc_now():
@@ -14,15 +14,36 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    google_id = Column(String(128), unique=True, index=True, nullable=False)
-    email = Column(String(255), unique=True, index=True, nullable=False)
     name = Column(String(255), nullable=False)
-    profile_image = Column(String(1024), nullable=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=True)
+    role = Column(String(64), nullable=False, default="GENERAL_USER")
+    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
-    last_login = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+    google_id = Column(String(128), unique=True, index=True, nullable=True)
+    profile_image = Column(String(1024), nullable=True)
+    last_login = Column(DateTime(timezone=True), nullable=True)
 
-    incidents = relationship("Incident", back_populates="user", cascade="all, delete-orphan")
-    custom_markings = relationship("CustomMarking", back_populates="user", cascade="all, delete-orphan")
+    incidents = relationship("Incident", back_populates="user", cascade="all, delete-orphan", primaryjoin="foreign(Incident.user_id) == User.id")
+    custom_markings = relationship("CustomMarking", back_populates="user", cascade="all, delete-orphan", primaryjoin="foreign(CustomMarking.user_id) == User.id")
+
+
+class AuthorizedRescuer(Base):
+    __tablename__ = "authorized_rescuers"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    rescuer_id = Column(String(64), unique=True, index=True, nullable=False)
+    name = Column(String(255), nullable=False)
+    organization = Column(String(255), nullable=False)
+    department = Column(String(255), nullable=False)
+    designation = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(64), nullable=False, default="AUTHORIZED_RESCUER")
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+    last_login = Column(DateTime(timezone=True), nullable=True)
 
 
 class Incident(Base):
@@ -30,7 +51,7 @@ class Incident(Base):
 
     # Backend generated unique incident ID (e.g. AM-2026-000001)
     id = Column(String(32), primary_key=True, index=True)
-    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id = Column(String(36), index=True, nullable=False)
     
     name = Column(String(255), nullable=False)
     location = Column(String(255), nullable=False)
@@ -61,7 +82,7 @@ class Incident(Base):
     key_observations = Column(JSON, default=list)
 
     # Relationships
-    user = relationship("User", back_populates="incidents")
+    user = relationship("User", back_populates="incidents", primaryjoin="foreign(Incident.user_id) == User.id")
     analysis_jobs = relationship("AnalysisJob", back_populates="incident", cascade="all, delete-orphan")
     frames = relationship("Frame", back_populates="incident", cascade="all, delete-orphan")
     detections = relationship("Detection", back_populates="incident", cascade="all, delete-orphan")
@@ -223,7 +244,7 @@ class CustomMarking(Base):
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     incident = relationship("Incident", back_populates="custom_markings")
-    user = relationship("User", back_populates="custom_markings")
+    user = relationship("User", back_populates="custom_markings", primaryjoin="foreign(CustomMarking.user_id) == User.id")
 
 
 class Report(Base):

@@ -192,6 +192,10 @@ export const historyIncidents: Incident[] = [
   },
 ];
 
+/**
+ * Default custom user markings (isSystem: false).
+ * Rescuer/operator annotations for landmarks and temporary facilities.
+ */
 export const defaultMarkings: CustomMarking[] = [
   {
     id: 'mk-mountain',
@@ -202,36 +206,7 @@ export const defaultMarkings: CustomMarking[] = [
     visible: true,
     position: [-12, 2.5, -14],
     iconType: 'mountain',
-  },
-  {
-    id: 'mk-docheck1',
-    name: 'Docheck Point 1',
-    type: 'Entry Point',
-    color: '#f59e0b',
-    description: 'Primary checkpoint location',
-    visible: true,
-    position: [-4.2, 1.8, -1.8],
-    iconType: 'pin',
-  },
-  {
-    id: 'mk-fire-major',
-    name: 'Fire Major',
-    type: 'Hazard',
-    color: '#ef4444',
-    description: 'Major fire incident zone',
-    visible: true,
-    position: [-2.0, 2.2, 0.2],
-    iconType: 'fire',
-  },
-  {
-    id: 'mk-rubble',
-    name: 'Rubble Zone',
-    type: 'Damage',
-    color: '#f97316',
-    description: 'Structural rubble and debris area',
-    visible: true,
-    position: [1.0, 1.8, 1.2],
-    iconType: 'warning',
+    isSystem: false,
   },
   {
     id: 'mk-shelter',
@@ -242,16 +217,7 @@ export const defaultMarkings: CustomMarking[] = [
     visible: true,
     position: [2.5, 1.6, 1.8],
     iconType: 'shelter',
-  },
-  {
-    id: 'mk-entry-exit',
-    name: 'Entry / Exit',
-    type: 'Entry Point',
-    color: '#10b981',
-    description: 'Entry and exit control point',
-    visible: true,
-    position: [6.0, 1.6, 3.2],
-    iconType: 'pin',
+    isSystem: false,
   },
   {
     id: 'mk-boat',
@@ -262,6 +228,7 @@ export const defaultMarkings: CustomMarking[] = [
     visible: true,
     position: [-1.5, -2.5, 4.0],
     iconType: 'boat',
+    isSystem: false,
   },
   {
     id: 'mk-water',
@@ -272,46 +239,140 @@ export const defaultMarkings: CustomMarking[] = [
     visible: true,
     position: [-5.0, -2.5, 4.5],
     iconType: 'water',
+    isSystem: false,
   },
 ];
+
+/**
+ * Default system analysis markings (isSystem: true).
+ * Pre-analyzed detection overlays for the demo bridge assessment across required categories:
+ * - Entry Point / Exit Point
+ * - Fire / Smoke
+ * - Structural Damage
+ * - Person (Humans)
+ * - Vehicle (Vehicles)
+ */
+export const DEFAULT_PLATFORM_MARKINGS: CustomMarking[] = [
+  {
+    id: 'sys-entry-1',
+    name: 'Docheck Point 1',
+    type: 'Entry Point',
+    color: '#10b981',
+    description: 'Primary checkpoint location',
+    visible: true,
+    position: [-4.2, 1.8, -1.8],
+    iconType: 'pin',
+    isSystem: true,
+    category: 'entryExit',
+    annotationType: 'Entry/Exit Points',
+  },
+  {
+    id: 'sys-entry-exit',
+    name: 'Entry / Exit',
+    type: 'Entry Point',
+    color: '#10b981',
+    description: 'Entry and exit control point',
+    visible: true,
+    position: [6.0, 1.6, 3.2],
+    iconType: 'pin',
+    isSystem: true,
+    category: 'entryExit',
+    annotationType: 'Entry/Exit Points',
+  },
+  {
+    id: 'sys-fire-major',
+    name: 'Fire Major',
+    type: 'Hazard',
+    color: '#ef4444',
+    description: 'Major fire incident zone',
+    visible: true,
+    position: [-2.0, 2.2, 0.2],
+    iconType: 'fire',
+    isSystem: true,
+    category: 'fireSmoke',
+    annotationType: 'Fire',
+  },
+  {
+    id: 'sys-rubble',
+    name: 'Rubble Zone',
+    type: 'Damage',
+    color: '#f97316',
+    description: 'Structural rubble and debris area',
+    visible: true,
+    position: [1.0, 1.8, 1.2],
+    iconType: 'warning',
+    isSystem: true,
+    category: 'damage',
+    annotationType: 'Damage',
+  },
+  {
+    id: 'sys-person-1',
+    name: 'Response Personnel',
+    type: 'Custom',
+    color: '#3b82f6',
+    description: 'Identified responder on deck',
+    visible: true,
+    position: [0.5, 1.8, -1.0],
+    iconType: 'pin',
+    isSystem: true,
+    category: 'humans',
+    annotationType: 'Peoples',
+  },
+  {
+    id: 'sys-vehicle-1',
+    name: 'Vehicle Detection #1',
+    type: 'Custom',
+    color: '#8b5cf6',
+    description: 'Detected vehicle on bridge span',
+    visible: true,
+    position: [-0.8, 1.8, -0.6],
+    iconType: 'pin',
+    isSystem: true,
+    category: 'vehicles',
+    annotationType: 'Vehicles',
+  },
+];
+
+export const PLATFORM_DETECTION_MARKINGS: CustomMarking[] = DEFAULT_PLATFORM_MARKINGS;
 
 export const defaultFilterState: FilterState = {
   reconstruction3D: true,
   entryExit: true,
-  humans: false,
+  humans: true,
   vehicles: true,
   fireSmoke: true,
   damage: true,
   labels: true,
   customMarkings: {
     'Mountain': true,
-    'Docheck Point 1': true,
-    'Fire Major': true,
-    'Rubble Zone': true,
     'Shelter Area': true,
-    'Entry / Exit': true,
     'Boat': true,
     'Water': true,
-  }
+  },
+  platformMarkingToggles: {},
 };
 
+/**
+ * Zero-state stats used for new/offline incidents that have not been analyzed.
+ * NEVER use non-zero hardcoded values here — they are fake.
+ */
 export const defaultIncidentStats: IncidentStats = {
-  totalPeople: 48,
-  peopleDelta: 3,
-  totalVehicles: 24,
-  vehiclesDelta: 2,
+  totalPeople: 0,
+  peopleDelta: 0,
+  totalVehicles: 0,
+  vehiclesDelta: 0,
   fireIncidents: {
-    major: 1,
-    minor: 1,
-    hazardous: 1
+    major: 0,
+    minor: 0,
+    hazardous: 0
   },
   entryExitPoints: {
-    total: 4,
-    entry: 2,
-    exit: 2
+    total: 0,
+    entry: 0,
+    exit: 0
   },
   damagedAreas: {
-    total: 2,
-    details: 'Bridge Section + Road'
+    total: 0,
+    details: 'N/A — No analysis run yet'
   }
 };

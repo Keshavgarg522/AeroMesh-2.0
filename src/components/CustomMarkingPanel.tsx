@@ -215,7 +215,7 @@ export const CustomMarkingPanel: React.FC<CustomMarkingPanelProps> = ({
           <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
             {markings.filter(m => !m.isSystem).length === 0 && (
               <p className="text-[11px] text-slate-600 italic text-center py-3">
-                No custom markings yet. Add one above.
+                No custom markings yet.
               </p>
             )}
             {markings

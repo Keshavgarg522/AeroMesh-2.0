@@ -33,6 +33,7 @@ export interface Incident {
   overallCondition?: OverallCondition;
   keyObservations?: string[];
   reconstruction_glb_url?: string;
+  video_path?: string;
 }
 
 export type MarkingType =
@@ -62,6 +63,9 @@ export interface CustomMarking {
   position: [number, number, number]; // 3D coordinates in scene
   iconType?: 'pin' | 'fire' | 'warning' | 'shelter' | 'boat' | 'mountain' | 'water';
   isSystem?: boolean; // True for system-generated detections; false for user-created markings
+  category?: 'entryExit' | 'humans' | 'vehicles' | 'fireSmoke' | 'damage';
+  /** AI pipeline annotation type: 'Peoples', 'Vehicles', 'Fire', 'Smoke', 'Damage', 'Entry/Exit Points' */
+  annotationType?: string;
 }
 
 export interface FilterState {
@@ -73,6 +77,8 @@ export interface FilterState {
   damage: boolean;
   labels: boolean;
   customMarkings: Record<string, boolean>;
+  /** Per-entity ON/OFF overrides for system/platform markings. Key = marking id. */
+  platformMarkingToggles: Record<string, boolean>;
 }
 
 // Detections are intentionally null until the real AI backend returns data.

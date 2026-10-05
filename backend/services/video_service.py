@@ -1,7 +1,7 @@
 import os
 import cv2
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from backend.services.storage import storage
 
 def format_duration(seconds: float) -> str:
@@ -51,7 +51,8 @@ class VideoService:
         video_abs_path: str,
         incident_id: str,
         min_keyframes: int = 20,
-        max_keyframes: int = 40
+        max_keyframes: int = 40,
+        target_frame_count: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Adaptive keyframe extraction optimized for photogrammetry and aerial drone footage.
@@ -72,6 +73,10 @@ class VideoService:
         duration_sec = total_frames / fps if fps > 0 else 0
 
         frames_dir = storage.get_incident_frames_dir(incident_id)
+
+        if target_frame_count is not None:
+            min_keyframes = target_frame_count
+            max_keyframes = target_frame_count
 
         if total_frames <= 0:
             cap.release()
@@ -201,7 +206,11 @@ class VideoService:
         # If more than max_keyframes, sub-sample while preserving maximum parallax
         if len(selected_candidates) > max_keyframes:
             step = len(selected_candidates) / float(max_keyframes)
-            selected_candidates = [selected_candidates[int(round(i * step))] for i in range(max_keyframes)]
+            selected_candidates = [selected_candidates[min(len(selected_candidates) - 1, int(i * step))] for i in range(max_keyframes)]
+
+        if target_frame_count is not None and len(selected_candidates) > target_frame_count:
+            step = len(selected_candidates) / float(target_frame_count)
+            selected_candidates = [selected_candidates[min(len(selected_candidates) - 1, int(i * step))] for i in range(target_frame_count)]
 
         # 3. Save selected frames to disk with sequential numbering
         extracted = []

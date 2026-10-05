@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 from backend.database import SessionLocal
 from backend.models import (
     Incident, AnalysisJob, Frame, Detection, Track,
-    ReconstructionResult, ReconstructionCamera, ReconstructionAnnotation, Report
+    ReconstructionResult, ReconstructionCamera, ReconstructionAnnotation, Report,
+    CustomMarking
 )
 from backend.services.storage import storage
 from backend.services.video_service import video_service
@@ -63,6 +64,11 @@ def run_incident_pipeline(incident_id: str):
         db.query(Track).filter(Track.incident_id == incident_id).delete()
         db.query(ReconstructionResult).filter(ReconstructionResult.incident_id == incident_id).delete()
         db.query(ReconstructionAnnotation).filter(ReconstructionAnnotation.incident_id == incident_id).delete()
+        db.query(CustomMarking).filter(
+            CustomMarking.incident_id == incident_id,
+            CustomMarking.is_system == True
+        ).delete()
+        db.query(Report).filter(Report.incident_id == incident_id).delete()
         db.commit()
 
         extracted_frames = video_service.extract_frames(video_abs_path, incident_id)
@@ -175,6 +181,16 @@ def run_incident_pipeline(incident_id: str):
             reconstruction_quality=rec_res.get("quality", "UNKNOWN")
         )
 
+        CATEGORY_STYLE = {
+            "Peoples": {"type": "Custom", "color": "#3b82f6", "icon": "pin"},
+            "Vehicles": {"type": "Custom", "color": "#8b5cf6", "icon": "pin"},
+            "Fire": {"type": "Hazard", "color": "#ef4444", "icon": "fire"},
+            "Smoke": {"type": "Hazard", "color": "#6b7280", "icon": "warning"},
+            "Damage": {"type": "Damage", "color": "#f59e0b", "icon": "warning"},
+            "Entry/Exit Points": {"type": "Entry Point", "color": "#10b981", "icon": "pin"},
+            "3D Reconstruction": {"type": "Hazard", "color": "#06b6d4", "icon": "pin"},
+        }
+
         for ann in annotations_3d:
             ann_obj = ReconstructionAnnotation(
                 incident_id=incident_id,
@@ -189,6 +205,27 @@ def run_incident_pipeline(incident_id: str):
                 source_frame_numbers=ann.get("source_frame_numbers", [])
             )
             db.add(ann_obj)
+
+            # Persist as default platform marking on the 3D model
+            style = CATEGORY_STYLE.get(ann["annotation_type"], {"type": "Custom", "color": "#3b82f6", "icon": "pin"})
+            track_id = ann.get("track_id", 0)
+            mark_id = f"sys-det-{incident_id}-{track_id}"
+            def_marking = CustomMarking(
+                id=mark_id,
+                incident_id=incident_id,
+                user_id=incident.user_id,
+                name=ann["label"],
+                type=style["type"],
+                color=style["color"],
+                description=f"AI-detected {ann['annotation_type']} (Confidence: {int(ann['confidence'] * 100)}%)",
+                pos_x=ann["pos_x"],
+                pos_y=ann["pos_y"],
+                pos_z=ann["pos_z"],
+                icon_type=style["icon"],
+                visible=True,
+                is_system=True
+            )
+            db.add(def_marking)
         db.commit()
 
         # ── 5. REPORT GENERATION ──────────────────────────────────────────────
@@ -241,12 +278,18 @@ def run_incident_pipeline(incident_id: str):
 
         try:
             pdf_generator.generate_report(report_data, report_pdf_path)
-            report_rec = Report(
-                incident_id=incident_id,
-                pdf_path=f"/storage/reports/{incident_id}_report.pdf",
-                summary_data=report_data
-            )
-            db.add(report_rec)
+            existing_rep = db.query(Report).filter(Report.incident_id == incident_id).first()
+            if existing_rep:
+                existing_rep.pdf_path = f"/storage/reports/{incident_id}_report.pdf"
+                existing_rep.summary_data = report_data
+                existing_rep.generated_at = datetime.now(timezone.utc)
+            else:
+                report_rec = Report(
+                    incident_id=incident_id,
+                    pdf_path=f"/storage/reports/{incident_id}_report.pdf",
+                    summary_data=report_data
+                )
+                db.add(report_rec)
             db.commit()
         except Exception as e:
             print(f"[AeroMesh Report Error] Could not generate PDF: {e}")

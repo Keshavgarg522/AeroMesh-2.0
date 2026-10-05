@@ -3,21 +3,42 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 # ─── Auth Schemas ─────────────────────────────────────────────────────────────
+class GeneralRegisterRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=255)
+    email: str = Field(..., min_length=5, max_length=255)
+    password: str = Field(..., min_length=6)
+
+class GeneralLoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1)
+
+class RescuerLoginRequest(BaseModel):
+    rescuer_id: str = Field(..., min_length=2, max_length=64)
+    password: str = Field(..., min_length=1)
+
 class GoogleAuthRequest(BaseModel):
     id_token: str
 
 class DevLoginRequest(BaseModel):
     email: str = "analyst@aeromesh.ai"
-    name: str = "Lead Geospatial Analyst"
+    name: str = "Keshav"
     profile_image: Optional[str] = None
 
 class UserResponse(BaseModel):
     id: str
-    email: str
+    email: Optional[str] = None
+    rescuer_id: Optional[str] = None
     name: str
+    role: str = "GENERAL_USER"
+    user_type: str = "general"
+    organization: Optional[str] = None
+    department: Optional[str] = None
+    designation: Optional[str] = None
+    is_active: bool = True
     profile_image: Optional[str] = None
     created_at: datetime
-    last_login: datetime
+    updated_at: Optional[datetime] = None
+    last_login: Optional[datetime] = None
 
 class AuthTokenResponse(BaseModel):
     access_token: str
@@ -36,6 +57,9 @@ class CustomMarkingCreate(BaseModel):
 
 class CustomMarkingUpdatePosition(BaseModel):
     position: List[float] = Field(..., min_items=3, max_items=3)
+
+class CustomMarkingUpdateVisibility(BaseModel):
+    visible: bool
 
 class CustomMarkingResponse(BaseModel):
     id: str

@@ -21,38 +21,36 @@ export const AnalysisReportModal: React.FC<AnalysisReportModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  // Use actual incident stats — never fabricate fake numbers.
+  // If stats are missing (incident not yet analyzed), show truthful zeros.
   const stats = incident.stats || {
-    totalPeople: 48,
-    peopleDelta: 3,
-    totalVehicles: 24,
-    vehiclesDelta: 2,
-    fireIncidents: { major: 1, minor: 1, hazardous: 1 },
-    entryExitPoints: { total: 4, entry: 2, exit: 2 },
-    damagedAreas: { total: 2, details: 'Bridge Section + Road' },
+    totalPeople: 0,
+    peopleDelta: 0,
+    totalVehicles: 0,
+    vehiclesDelta: 0,
+    fireIncidents: { major: 0, minor: 0, hazardous: 0 },
+    entryExitPoints: { total: 0, entry: 0, exit: 0 },
+    damagedAreas: { total: 0, details: 'N/A — Not analyzed' },
   };
 
   const detected = incident.detectedConditions || {
-    structuralDamage: true,
-    fire: true,
-    smoke: true,
-    humanPresence: true,
-    vehiclePresence: true,
-    entryExit: true,
+    structuralDamage: false,
+    fire: false,
+    smoke: false,
+    humanPresence: false,
+    vehiclePresence: false,
+    entryExit: false,
   };
 
   const overall = incident.overallCondition || {
-    level: 'CRITICAL',
-    title: 'CRITICAL',
-    description:
-      'The analysed scene indicates significant structural damage with active fire activity and multiple detected entities. The affected area should be inspected and secured immediately.',
+    level: 'UNKNOWN',
+    title: 'Pending Assessment',
+    description: 'Upload a drone video and run analysis to generate a real report.',
   };
 
   const observations = incident.keyObservations || [
-    'Structural damage detected on the bridge section.',
-    'Active fire detected near the roadway.',
-    'Multiple vehicles identified in the affected zone.',
-    'Human presence detected within the incident area.',
-    'Multiple entry and exit points identified.',
+    'No analysis has been run yet for this incident.',
+    'Upload a video and click Analyze to generate real observations.',
   ];
 
   return (

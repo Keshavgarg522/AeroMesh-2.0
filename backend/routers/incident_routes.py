@@ -1,10 +1,10 @@
 import os
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 
 from backend.database import get_db
 from backend.models import (
@@ -15,10 +15,11 @@ from backend.schemas import (
     IncidentCreate, IncidentResponse, IncidentStats, DetectedConditions,
     OverallCondition, FireIncidents, EntryExitPoints, DamagedAreas,
     VideoFrameResponse, CustomMarkingCreate, CustomMarkingUpdatePosition,
+    CustomMarkingUpdateVisibility,
     CustomMarkingResponse, ReconstructionResponse, ReconstructionAnnotationResponse,
     JobStatusResponse, DetectionResponse
 )
-from backend.auth import get_current_user
+from backend.auth import get_current_user, require_rescuer
 from backend.services.storage import storage
 from backend.services.video_service import video_service
 from backend.services.pipeline_runner import run_incident_pipeline
@@ -43,23 +44,34 @@ def generate_incident_id(db: Session) -> str:
 def map_incident_to_response(inc: Incident, db: Session) -> IncidentResponse:
     # Build actual stats from tracks/detections in DB
     tracks = db.query(Track).filter(Track.incident_id == inc.id).all()
-    people_tracks = [t for t in tracks if t.entity_class == "person"]
-    vehicle_tracks = [t for t in tracks if t.entity_class in {"car", "truck", "bus", "motorcycle", "vehicle"}]
+    # Use the new whitelist category names set by category_filter.py
+    people_tracks  = [t for t in tracks if t.entity_class == "Peoples"]
+    vehicle_tracks = [t for t in tracks if t.entity_class == "Vehicles"]
+    fire_tracks    = [t for t in tracks if t.entity_class == "Fire"]
+    smoke_tracks   = [t for t in tracks if t.entity_class == "Smoke"]
+    damage_tracks  = [t for t in tracks if t.entity_class == "Damage"]
 
     stats = IncidentStats(
         totalPeople=len(people_tracks),
         peopleDelta=0,
         totalVehicles=len(vehicle_tracks),
         vehiclesDelta=0,
-        fireIncidents=FireIncidents(major=0, minor=0, hazardous=0),
+        fireIncidents=FireIncidents(
+            major=len(fire_tracks),
+            minor=0,
+            hazardous=len(smoke_tracks)
+        ),
         entryExitPoints=EntryExitPoints(total=0, entry=0, exit=0),
-        damagedAreas=DamagedAreas(total=0, details="N/A — No damage detected")
+        damagedAreas=DamagedAreas(
+            total=len(damage_tracks),
+            details=f"{len(damage_tracks)} damage area(s) detected" if damage_tracks else "N/A \u2014 No damage detected"
+        )
     )
 
     detected = DetectedConditions(
-        structuralDamage=False,
-        fire=False,
-        smoke=False,
+        structuralDamage=len(damage_tracks) > 0,
+        fire=len(fire_tracks) > 0,
+        smoke=len(smoke_tracks) > 0,
         humanPresence=len(people_tracks) > 0,
         vehiclePresence=len(vehicle_tracks) > 0,
         entryExit=False
@@ -351,9 +363,11 @@ def get_incident_frames(
     res = []
     for fr in frames:
         # Check detections count for this frame
+        # NOTE: entity_class uses AeroMesh category names (set by category_filter.py):
+        #   "Peoples" for persons, "Vehicles" for all vehicle types
         dets = db.query(Detection).filter(Detection.frame_id == fr.id).all()
-        peeps = len([d for d in dets if d.entity_class == "person"])
-        vehs = len([d for d in dets if d.entity_class in {"car", "truck", "bus", "motorcycle", "vehicle"}])
+        peeps = len([d for d in dets if d.entity_class == "Peoples"])
+        vehs = len([d for d in dets if d.entity_class == "Vehicles"])
 
         res.append(VideoFrameResponse(
             id=fr.id,
@@ -476,7 +490,7 @@ def get_custom_markings(
 
     marks = db.query(CustomMarking).filter(
         CustomMarking.incident_id == incident_id,
-        CustomMarking.user_id == current_user.id
+        or_(CustomMarking.user_id == current_user.id, CustomMarking.is_system == True)
     ).all()
 
     return [
@@ -595,6 +609,37 @@ def update_marking_position(
         isSystem=mark.is_system
     )
 
+@router.put("/markings/{marking_id}/visibility", response_model=CustomMarkingResponse)
+def update_marking_visibility(
+    marking_id: str,
+    payload: CustomMarkingUpdateVisibility,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    mark = db.query(CustomMarking).filter(
+        CustomMarking.id == marking_id,
+        CustomMarking.user_id == current_user.id
+    ).first()
+    if not mark:
+        raise HTTPException(status_code=404, detail="Marking not found or access denied")
+    
+    mark.visible = payload.visible
+    db.commit()
+    db.refresh(mark)
+
+    return CustomMarkingResponse(
+        id=mark.id,
+        incident_id=mark.incident_id,
+        name=mark.name,
+        type=mark.type,
+        color=mark.color,
+        description=mark.description,
+        position=[mark.pos_x, mark.pos_y, mark.pos_z],
+        iconType=mark.icon_type,
+        visible=mark.visible,
+        isSystem=mark.is_system
+    )
+
 # ─── Reports ──────────────────────────────────────────────────────────────────
 
 @router.get("/{incident_id}/report")
@@ -643,3 +688,21 @@ def download_report_pdf(
         media_type="application/pdf",
         filename=f"AeroMesh_{incident_id}_Report.pdf"
     )
+
+@router.post("/{incident_id}/tactical-dispatch")
+def tactical_dispatch(
+    incident_id: str,
+    payload: Dict[str, Any],
+    current_user: Any = Depends(require_rescuer),
+    db: Session = Depends(get_db)
+):
+    """
+    Tactical team dispatch endpoint restricted strictly to Authorized Rescuers (RBAC).
+    """
+    return {
+        "status": "DISPATCHED",
+        "incident_id": incident_id,
+        "team_callsign": payload.get("team_callsign"),
+        "priority": payload.get("priority", "NORMAL"),
+        "rescuer_id": getattr(current_user, "rescuer_id", "FIRE-001")
+    }

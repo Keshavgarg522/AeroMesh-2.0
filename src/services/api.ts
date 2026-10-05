@@ -87,6 +87,33 @@ class ApiService {
     return res;
   }
 
+  public async loginWithEmail(email: string, password: string): Promise<AuthResponse> {
+    const res = await this.request<AuthResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    this.setToken(res.access_token);
+    return res;
+  }
+
+  public async loginWithRescuerId(rescuer_id: string, password: string): Promise<AuthResponse> {
+    const res = await this.request<AuthResponse>('/auth/rescuer/login', {
+      method: 'POST',
+      body: JSON.stringify({ rescuer_id, password }),
+    });
+    this.setToken(res.access_token);
+    return res;
+  }
+
+  public async register(name: string, email: string, password: string): Promise<AuthResponse> {
+    const res = await this.request<AuthResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, password }),
+    });
+    this.setToken(res.access_token);
+    return res;
+  }
+
   public async devLogin(email = 'analyst@aeromesh.ai', name = 'Keshav'): Promise<AuthResponse> {
     const res = await this.request<AuthResponse>('/auth/dev-login', {
       method: 'POST',
@@ -189,6 +216,16 @@ class ApiService {
     return this.request<CustomMarking>(`/incidents/markings/${markingId}/position`, {
       method: 'PUT',
       body: JSON.stringify({ position }),
+    });
+  }
+
+  public async updateMarkingVisibility(
+    markingId: string,
+    visible: boolean
+  ): Promise<CustomMarking> {
+    return this.request<CustomMarking>(`/incidents/markings/${markingId}/visibility`, {
+      method: 'PUT',
+      body: JSON.stringify({ visible }),
     });
   }
 

@@ -1,10 +1,11 @@
 import os
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Optional, Set
+from backend.services.category_filter import classify_ai_detection
 from ultralytics import YOLO
 from backend.config import settings
 
 # Mapping COCO classes to AeroMesh categories
-VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle", "bicycle", "train"}
+VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle", "bicycle", "train", "boat", "airplane"}
 PERSON_CLASSES = {"person"}
 
 class AIDetectorService:
@@ -66,14 +67,14 @@ class AIDetectorService:
                 source=frame_paths,
                 tracker="bytetrack.yaml",
                 persist=True,
-                conf=0.25,
+                conf=0.15,
                 verbose=False
             )
         except Exception:
             # Fallback to standard inference if tracker fails
             results = model.predict(
                 source=frame_paths,
-                conf=0.25,
+                conf=0.15,
                 verbose=False
             )
 
@@ -106,15 +107,22 @@ class AIDetectorService:
                     # Fallback track identifier based on class and spatial proximity
                     track_id = (frame_idx + 1) * 100 + i
 
-                # Classify into AeroMesh entity categories
-                if cls_name in PERSON_CLASSES:
-                    entity_type = "person"
+                # ── Strict category whitelist enforcement ─────────────────
+                # Validate the raw YOLO class through the AeroMesh whitelist.
+                # Any class not in {Peoples, Vehicles, Fire, Smoke, Damage,
+                # Entry/Exit Points, 3D Reconstruction} is silently discarded.
+                aeromesh_category: Optional[str] = classify_ai_detection(cls_name)
+                if aeromesh_category is None:
+                    # Not an allowed AeroMesh category — skip this detection entirely
+                    continue
+
+                entity_type = aeromesh_category
+
+                # Update unique track counts for allowed categories
+                if aeromesh_category == "Peoples":
                     unique_people_tracks.add(track_id)
-                elif cls_name in VEHICLE_CLASSES:
-                    entity_type = "vehicle"
+                elif aeromesh_category == "Vehicles":
                     unique_vehicle_tracks.add(track_id)
-                else:
-                    entity_type = cls_name
 
                 # Store track summary
                 if track_id not in track_records:

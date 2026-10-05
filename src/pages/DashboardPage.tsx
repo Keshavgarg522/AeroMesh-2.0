@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Box, Film } from 'lucide-react';
 import { useIncident } from '../context/IncidentContext';
 import { BridgeViewer } from '../components/BridgeViewer';
@@ -6,9 +6,17 @@ import { DashboardFilters } from '../components/DashboardFilters';
 import { CustomMarkingPanel } from '../components/CustomMarkingPanel';
 import { DashboardStats } from '../components/DashboardStats';
 import { VideoFramesTab } from '../components/VideoFramesTab';
+import { api } from '../services/api';
 import type { PendingMarkingData, MarkingType } from '../types';
 
 type DashboardTab = '3d' | 'frames';
+
+// Analysis statuses that indicate the pipeline is still running
+const ACTIVE_ANALYSIS_STATUSES = new Set([
+  'EXTRACTING_FRAMES', 'DETECTING_ENTITIES', 'TRACKING',
+  'RECONSTRUCTING_3D', 'MAPPING_3D_ANNOTATIONS', 'GENERATING_REPORT',
+  'In Progress', 'Processing', 'QUEUED',
+]);
 
 export const DashboardPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<DashboardTab>('3d');
@@ -19,14 +27,64 @@ export const DashboardPage: React.FC = () => {
     deleteMarking,
     toggleMarkingVisibility,
     updateMarkingPosition,
+    customMarkingsMaster,
+    setCustomMarkingsMaster,
     filters,
     setFilter,
     setCustomMarkingFilter,
+    setPlatformMarkingFilter,
     resetFilters,
     stats,
+    platformMarkings,
+    refreshIncident,
   } = useIncident();
 
+  // ── Analysis Status Polling ────────────────────────────────────────────────
+  // When an analysis is running in the background, poll every 3s.
+  // On completion, refresh the incident to get real stats and annotations.
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  useEffect(() => {
+    const isActive = ACTIVE_ANALYSIS_STATUSES.has(incident.status);
+
+    const stopPolling = () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+
+    if (!isActive) {
+      stopPolling();
+      return;
+    }
+
+    // Start polling
+    if (pollTimerRef.current) return; // already polling
+
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const jobStatus = await api.getJobStatus(incident.id);
+        if (jobStatus.completed || !ACTIVE_ANALYSIS_STATUSES.has(jobStatus.status)) {
+          // Analysis finished — refresh to get real stats + annotations
+          stopPolling();
+          await refreshIncident(incident.id);
+        }
+      } catch {
+        // Backend offline — stop polling to avoid repeated errors
+        stopPolling();
+      }
+    }, 3000);
+
+    return stopPolling;
+  }, [incident.id, incident.status, refreshIncident]);
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, []);
 
   // ── Placement workflow state ──────────────────────────────────────────────
   /** Form data collected from the panel, waiting for a location click */
@@ -85,6 +143,10 @@ export const DashboardPage: React.FC = () => {
     setRepositioningId(null);
   }, []);
 
+  const modelUrl = useMemo(() => {
+    return api.getModelUrl(incident.reconstruction_glb_url) || (incident.id ? `http://localhost:8000/storage/models/${incident.id}.glb` : null);
+  }, [incident.reconstruction_glb_url, incident.id]);
+
   return (
     <div className="h-[calc(100vh-64px)] w-full bg-[#050811] text-slate-100 flex flex-col overflow-hidden">
       <div className="h-11 bg-[#060a16] border-b border-[#121f3d] px-4 flex items-center justify-between flex-shrink-0">
@@ -129,20 +191,27 @@ export const DashboardPage: React.FC = () => {
               <DashboardFilters
                 filters={filters}
                 onToggleFilter={setFilter}
+                customMarkingsMaster={customMarkingsMaster}
+                onToggleCustomMarkingsMaster={setCustomMarkingsMaster}
                 onToggleCustomMarking={setCustomMarkingFilter}
+                onTogglePlatformMarking={setPlatformMarkingFilter}
                 onReset={resetFilters}
                 markings={markings}
+                platformMarkings={platformMarkings}
               />
 
               <div className="flex-1 min-w-0 h-full relative p-2 bg-[#050811]">
                 <BridgeViewer
                   filters={filters}
+                  customMarkingsMaster={customMarkingsMaster}
                   markings={markings}
+                  platformMarkings={platformMarkings}
                   placementMode={placementMode}
                   pendingColor={pendingColor}
                   onPlacementConfirm={handlePlacementConfirm}
                   onCancelPlacement={handleCancelPlacement}
                   incidentId={incident.id}
+                  modelUrl={modelUrl}
                 />
               </div>
 

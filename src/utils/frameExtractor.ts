@@ -349,21 +349,36 @@ export async function extractFramesFromFile(
       fps: fps ?? null,
     };
 
-    let targetCount = maxFrames;
-    if (duration < 6) {
-      targetCount = Math.min(maxFrames, Math.max(8, Math.floor(duration * 3)));
-    } else if (duration < 15) {
-      targetCount = Math.min(maxFrames, Math.max(12, Math.floor(duration * 1.5)));
-    }
-    if (targetCount > 8 && targetCount % 4 !== 0) {
-      targetCount = Math.round(targetCount / 4) * 4;
+    // Adaptive sampling: determine count based on duration
+    let targetCount: number;
+    if (duration <= 10) {
+      // 10s or shorter: ~8 to 16 frames spanning the entire video
+      targetCount = Math.max(8, Math.min(16, Math.round(duration * 1.5)));
+    } else if (duration <= 30) {
+      // 10s - 30s: ~16 to 24 frames
+      targetCount = Math.max(16, Math.min(28, Math.round(16 + (duration - 10) * 0.5)));
+    } else if (duration <= 60) {
+      // 30s - 60s: ~24 to 36 frames representing the full 60 seconds
+      targetCount = Math.max(24, Math.min(36, Math.round(24 + (duration - 30) * 0.4)));
+    } else {
+      // > 60s: 36 to 48 frames spanning the full duration
+      targetCount = Math.min(48, Math.round(36 + Math.min(12, (duration - 60) * 0.1)));
     }
 
-    const step = duration / targetCount;
+    if (maxFrames && maxFrames > 0 && targetCount > maxFrames) {
+      targetCount = maxFrames;
+    }
+
+    // Ensure evenly spaced keyframes covering from start (0.05s) to end (duration - 0.05s)
     const sampleTimes: number[] = [];
-    for (let i = 0; i < targetCount; i++) {
-      const t = (i + 0.5) * step;
-      sampleTimes.push(Math.max(0.05, Math.min(duration - 0.05, t)));
+    if (targetCount <= 1) {
+      sampleTimes.push(duration / 2);
+    } else {
+      for (let i = 0; i < targetCount; i++) {
+        const fraction = i / (targetCount - 1);
+        const t = Math.max(0.05, Math.min(duration - 0.05, 0.05 + fraction * (duration - 0.1)));
+        sampleTimes.push(t);
+      }
     }
 
     const frames: VideoFrame[] = [];

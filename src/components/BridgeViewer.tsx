@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { FilterState, CustomMarking } from '../types';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   Crosshair,
   Plus,
@@ -19,11 +20,15 @@ import {
   Users,
   MousePointerClick,
   X,
+  Loader2,
 } from 'lucide-react';
 
 interface BridgeViewerProps {
   filters: FilterState;
+  customMarkingsMaster?: boolean;
   markings: CustomMarking[];
+  /** Platform (AI-detected) markings from backend annotations — controlled by platform layer toggles */
+  platformMarkings?: CustomMarking[];
   onRecenter?: () => void;
   /** When true, the viewer enters placement mode — waiting for a click to place a marker */
   placementMode?: boolean;
@@ -35,6 +40,8 @@ interface BridgeViewerProps {
   onCancelPlacement?: () => void;
   /** Incident ID */
   incidentId?: string;
+  /** Direct model URL to the real GLB 3D reconstruction */
+  modelUrl?: string | null;
 }
 
 interface ProjectedBox {
@@ -54,12 +61,15 @@ interface ProjectedBox {
 
 export const BridgeViewer: React.FC<BridgeViewerProps> = ({
   filters,
+  customMarkingsMaster = true,
   markings,
+  platformMarkings = [],
   placementMode = false,
   pendingColor = '#f59e0b',
   onPlacementConfirm,
   onCancelPlacement,
   incidentId,
+  modelUrl,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -69,11 +79,22 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
 
   // Root model group ref (procedural bridge scene)
   const rootModelGroupRef = useRef<THREE.Group | null>(null);
+  // Real 3D Photogrammetry GLB model group ref
+  const realModelGroupRef = useRef<THREE.Group | null>(null);
+  const isRealModelLoadedRef = useRef<boolean>(false);
+  const [modelStatus, setModelStatus] = useState<'idle' | 'loading' | 'loaded' | 'empty'>('idle');
   const incidentIdRef = useRef<string | undefined>(incidentId);
+
+  // Shared scene ref — lets the markers effect add 3D pins without rebuilding the scene
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  // Dedicated group for all 3D entity-marker pins (platform + custom)
+  const markersGroupRef = useRef<THREE.Group | null>(null);
 
   // ── Live refs so the animate loop always sees the latest props without scene rebuild ──
   const filtersRef = useRef<FilterState>(filters);
+  const customMarkingsMasterRef = useRef<boolean>(customMarkingsMaster);
   const markingsRef = useRef<CustomMarking[]>(markings);
+  const platformMarkingsRef = useRef<CustomMarking[]>(platformMarkings);
   const placementModeRef = useRef<boolean>(placementMode);
   const pendingColorRef = useRef<string>(pendingColor);
   const onPlacementConfirmRef = useRef(onPlacementConfirm);
@@ -86,7 +107,9 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
 
   // Keep refs in sync with latest props on every render
   useEffect(() => { filtersRef.current = filters; }, [filters]);
+  useEffect(() => { customMarkingsMasterRef.current = customMarkingsMaster; }, [customMarkingsMaster]);
   useEffect(() => { markingsRef.current = markings; }, [markings]);
+  useEffect(() => { platformMarkingsRef.current = platformMarkings; }, [platformMarkings]);
   useEffect(() => { placementModeRef.current = placementMode; }, [placementMode]);
   useEffect(() => { pendingColorRef.current = pendingColor; }, [pendingColor]);
   useEffect(() => { onPlacementConfirmRef.current = onPlacementConfirm; }, [onPlacementConfirm]);
@@ -137,6 +160,7 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x020713);
     scene.fog = new THREE.FogExp2(0x020713, 0.014);
+    sceneRef.current = scene;
 
     // --- 2. CAMERA SETUP ---
     const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 400);
@@ -206,10 +230,24 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
     shelterPointLight.position.set(2.5, 1.6, 1.8);
     scene.add(shelterPointLight);
 
-    // --- 6. ROOT MODEL GROUP (procedural bridge — always visible) ---
+    // --- 6. ROOT MODEL GROUP (procedural bridge for initial demo) ---
     const rootModelGroup = new THREE.Group();
     scene.add(rootModelGroup);
     rootModelGroupRef.current = rootModelGroup;
+
+    // --- 6b. REAL 3D RECONSTRUCTION MODEL GROUP (from real SfM GLB export) ---
+    const realModelGroup = new THREE.Group();
+    scene.add(realModelGroup);
+    realModelGroupRef.current = realModelGroup;
+
+    // --- 6c. ENTITY MARKERS GROUP — 3D pins for detected + custom entities ---
+    // This group lives at the top of the scene so markers always render above terrain.
+    // The reactive useEffect below populates it whenever markings / filters change.
+    const markersGroup = new THREE.Group();
+    markersGroup.renderOrder = 10; // draw on top
+    scene.add(markersGroup);
+    markersGroupRef.current = markersGroup;
+
 
     // Common Materials
     const cyanWireMat = new THREE.LineBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.85 });
@@ -658,10 +696,20 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
       mouseNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
       raycaster.setFromCamera(mouseNDC, camera);
-      const hit = raycaster.ray.intersectPlane(placementPlane, intersectPoint);
+      let hit = false;
+      if (isRealModelLoadedRef.current && realModelGroupRef.current && realModelGroupRef.current.children.length > 0) {
+        const intersects = raycaster.intersectObjects(realModelGroupRef.current.children, true);
+        if (intersects.length > 0) {
+          intersectPoint.copy(intersects[0].point);
+          hit = true;
+        }
+      }
+      if (!hit) {
+        hit = !!raycaster.ray.intersectPlane(placementPlane, intersectPoint);
+      }
 
       if (hit) {
-        ghostGroup.position.set(intersectPoint.x, 0, intersectPoint.z);
+        ghostGroup.position.set(intersectPoint.x, intersectPoint.y, intersectPoint.z);
         ghostGroup.visible = true;
       } else {
         ghostGroup.visible = false;
@@ -681,10 +729,20 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
       mouseNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
       raycaster.setFromCamera(mouseNDC, camera);
-      const hit = raycaster.ray.intersectPlane(placementPlane, intersectPoint);
+      let hit = false;
+      if (isRealModelLoadedRef.current && realModelGroupRef.current && realModelGroupRef.current.children.length > 0) {
+        const intersects = raycaster.intersectObjects(realModelGroupRef.current.children, true);
+        if (intersects.length > 0) {
+          intersectPoint.copy(intersects[0].point);
+          hit = true;
+        }
+      }
+      if (!hit) {
+        hit = !!raycaster.ray.intersectPlane(placementPlane, intersectPoint);
+      }
 
       if (hit) {
-        const pos: [number, number, number] = [intersectPoint.x, 1.2, intersectPoint.z];
+        const pos: [number, number, number] = [intersectPoint.x, Math.max(0.5, intersectPoint.y + 0.2), intersectPoint.z];
         onPlacementConfirmRef.current?.(pos);
       }
     };
@@ -775,74 +833,72 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
         setGhostScreenPos(null);
       }
 
-      // ── Filter-driven 3D object visibility ──────────────────────────────
-      // Procedural highway bridge is always the default scene
-      rootModelGroup.visible = f.reconstruction3D;
-      vehicleGroup.visible = f.vehicles;
-      rubbleMeshGroup.visible = f.damage;
-      fireMeshGroup.visible = f.fireSmoke;
-      boatGroup.visible = f.customMarkings['Boat'] !== false;
+      // ── LAYER 1 — RECONSTRUCTED 3D MODEL ────────────────────────────────
+      // Includes bridge, road, terrain, reconstructed vehicles, rubble, fire, and boat.
+      // Reconstructed 3D geometry is controlled EXCLUSIVELY by f.reconstruction3D.
+      // Detection-category filter buttons (humans, vehicles, fireSmoke, damage, entryExit)
+      // must NEVER modify or hide Layer 1 geometry!
+      if (isRealModelLoadedRef.current && realModelGroupRef.current) {
+        realModelGroupRef.current.visible = f.reconstruction3D;
+        rootModelGroup.visible = false;
+        vehicleGroup.visible = false;
+        rubbleMeshGroup.visible = false;
+        fireMeshGroup.visible = false;
+        boatGroup.visible = false;
+      } else {
+        rootModelGroup.visible = f.reconstruction3D;
+        vehicleGroup.visible = f.reconstruction3D;
+        rubbleMeshGroup.visible = f.reconstruction3D;
+        fireMeshGroup.visible = f.reconstruction3D;
+        boatGroup.visible = f.reconstruction3D;
+      }
 
-      // ── Compute 2D projections for user custom markings only ───────
+      // ── 3D MARKER PIN ANIMATION ──────────────────────────────────────────
+      // Animate sphere bob + ring pulse for all pins in the markersGroup.
+      if (markersGroupRef.current) {
+        markersGroupRef.current.children.forEach((pinGroup, i) => {
+          // Each pinGroup has: stem[0], sphere[1], ring[2], glowRing[3], (optional ptLight[4])
+          const sphere   = pinGroup.children[1] as THREE.Mesh | undefined;
+          const ring     = pinGroup.children[2] as THREE.Mesh | undefined;
+          const glowRing = pinGroup.children[3] as THREE.Mesh | undefined;
+
+          const phase = i * 0.7; // stagger each pin
+          const bob   = Math.sin(time * 1.8 + phase) * 0.08;
+          const pulse = 1.0 + Math.sin(time * 2.2 + phase) * 0.15;
+
+          if (sphere)   sphere.position.y = sphere.position.y + bob * 0.02; // subtle
+          if (ring)     ring.scale.set(pulse, pulse, 1);
+          if (glowRing) glowRing.scale.set(pulse * 1.1, pulse * 1.1, 1);
+        });
+      }
+
+      // ── LAYER 2 — ANALYSIS OVERLAYS ─────────────────────────────────────
+      // Category filters control ONLY Layer 2 overlays (markers and labels).
+
       const currentWidth = container.clientWidth;
       const currentHeight = container.clientHeight;
 
-      // Filter to user-created custom markings only (system detection markings removed per user request)
-      const allMarkings: CustomMarking[] = m.filter((mk) => !mk.isSystem);
-
-      const projected: ProjectedBox[] = allMarkings.map((mk) => {
-        // Start from the marking's own visible flag
-        let isVis = mk.visible;
-
-        // System filter overrides (filter panel primary toggles)
-        if (mk.isSystem) {
-          // Fire / Smoke type markings → fireSmoke filter
-          if (mk.type === 'Hazard') {
-            isVis = isVis && f.fireSmoke;
-          }
-          // Damage type markings → damage filter
-          if (mk.type === 'Damage') {
-            isVis = isVis && f.damage;
-          }
-          // Entry / Exit type markings → entryExit filter
-          if (mk.type === 'Entry Point') {
-            isVis = isVis && f.entryExit;
-          }
-          // 'Response Personnel' maps to the humans filter
-          if (mk.name === 'Response Personnel') {
-            isVis = isVis && f.humans;
-          }
-        }
-
-        // Custom marking filter (individual per-name toggles in filter panel)
-        // Only apply if explicitly set to false; undefined = show
-        if (f.customMarkings[mk.name] === false) {
-          isVis = false;
-        }
-
-        // Bounding box corners
+      const projectMarking = (mk: CustomMarking, isVis: boolean): ProjectedBox => {
         const corners3D = getFootprintCorners(mk);
         const screenCorners: { x: number; y: number }[] = [];
-        let allInFront = true;
 
         corners3D.forEach((pt) => {
           tempVec.copy(pt);
           tempVec.project(camera);
-          if (tempVec.z >= 1) allInFront = false;
           screenCorners.push({
             x: ((tempVec.x + 1) * currentWidth) / 2,
             y: ((-tempVec.y + 1) * currentHeight) / 2,
           });
         });
 
-        // Center Anchor Point
+        // Center Anchor Point — only this determines if marker is in front of camera
         tempVec.set(mk.position[0], mk.position[1], mk.position[2]);
         tempVec.project(camera);
-        if (tempVec.z >= 1) allInFront = false;
+        const centerInFront = tempVec.z < 1.0; // z >= 1 means behind camera or at far clip
         const anchorX = ((tempVec.x + 1) * currentWidth) / 2;
         const anchorY = ((-tempVec.y + 1) * currentHeight) / 2;
 
-        // Badge Point (Raised stem)
+        // Badge Point (Raised stem above marker)
         tempVec.set(mk.position[0], mk.position[1] + 2.2, mk.position[2]);
         tempVec.project(camera);
         const badgeX = ((tempVec.x + 1) * currentWidth) / 2;
@@ -855,7 +911,7 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
           name: mk.name,
           type: mk.type,
           color: mk.color,
-          visible: isVis && allInFront,
+          visible: isVis && centerInFront,
           pointsSvg,
           badgeX,
           badgeY,
@@ -864,9 +920,74 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
           iconType: mk.iconType,
           zDist: tempVec.z,
         };
+      };
+
+
+      // 1. System Analysis Markings (isSystem === true)
+      // Sourced from backend AI annotations or default system assessment markings.
+      const allSystemMarkings: CustomMarking[] = [
+        ...platformMarkingsRef.current,
+        ...m.filter((mk) => mk.isSystem),
+      ];
+      const systemMap = new Map<string, CustomMarking>();
+      allSystemMarkings.forEach((sm) => systemMap.set(sm.id, sm));
+      const systemMarkings = Array.from(systemMap.values());
+
+      const platformProjected: ProjectedBox[] = systemMarkings.map((mk) => {
+        // Build all identifier signals — use every available field for maximum match coverage
+        const annType = (mk.annotationType || '').toLowerCase();
+        const cat     = (mk.category     || '').toLowerCase();
+        const mkType  = (mk.type         || '').toLowerCase();
+        const name    = (mk.name         || '').toLowerCase();
+
+        const isHuman = annType.includes('people') || annType.includes('person') || annType.includes('human') ||
+          cat === 'humans' || mkType.includes('human') ||
+          name.includes('person') || name.includes('personnel') || name.includes('human') || name.includes('people');
+
+        const isVehicle = annType.includes('vehicle') || annType.includes('car') || annType.includes('truck') ||
+          cat === 'vehicles' || mkType.includes('vehicle') ||
+          name.includes('vehicle') || name.includes('car') || name.includes('truck');
+
+        const isFire = annType.includes('fire') || annType.includes('smoke') || annType.includes('hazard') ||
+          cat === 'firesmoke' || mkType === 'hazard' ||
+          name.includes('fire') || name.includes('smoke') || name.includes('flame') || name.includes('hazard');
+
+        const isDamage = annType.includes('damage') || annType.includes('rubble') ||
+          cat === 'damage' || mkType === 'damage' ||
+          name.includes('damage') || name.includes('rubble') || name.includes('collapse') || name.includes('crack');
+
+        const isEntry = annType.includes('entry') || annType.includes('exit') || annType.includes('checkpoint') ||
+          cat === 'entryexit' || mkType === 'entry point' ||
+          name.includes('entry') || name.includes('exit') || name.includes('docheck') || name.includes('checkpoint');
+
+        let isVis: boolean;
+        if (isHuman)        isVis = f.humans;
+        else if (isVehicle) isVis = f.vehicles;
+        else if (isFire)    isVis = f.fireSmoke;
+        else if (isDamage)  isVis = f.damage;
+        else if (isEntry)   isVis = f.entryExit;
+        else                isVis = true; // unclassified system markings always visible
+
+        // Per-entity override: individual toggle can hide within an ON category
+        if (isVis && f.platformMarkingToggles && mk.id in f.platformMarkingToggles) {
+          isVis = f.platformMarkingToggles[mk.id] !== false;
+        }
+
+        return projectMarking(mk, isVis);
       });
 
-      setProjectedBoxes(projected);
+      // 2. User-Created Custom Markings (isSystem === false)
+      // Controlled exclusively by customMarkingsMaster and individual custom toggles.
+      const isCustomMasterOn = customMarkingsMasterRef.current !== false;
+      const customMarkings: CustomMarking[] = m.filter((mk) => !mk.isSystem);
+
+      const userProjected: ProjectedBox[] = customMarkings.map((mk) => {
+        const isIndividuallyVis = mk.visible !== false && f.customMarkings[mk.name] !== false;
+        const isVis = isCustomMasterOn && isIndividuallyVis;
+        return projectMarking(mk, isVis);
+      });
+
+      setProjectedBoxes([...platformProjected, ...userProjected]);
       renderer.render(scene, camera);
     };
 
@@ -900,18 +1021,271 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // ← EMPTY DEPS: scene is built once; filters & markings are read via refs
 
-  // No GLB loading — procedural highway bridge is always the display
+  // ── Load Real GLB 3D Reconstruction Model from Backend ────────────────────
+  useEffect(() => {
+    const realGroup = realModelGroupRef.current;
+    const rootGroup = rootModelGroupRef.current;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!realGroup || !camera || !controls) return;
+
+    // Clear previous real model when incident changes
+    while (realGroup.children.length > 0) {
+      realGroup.remove(realGroup.children[0]);
+    }
+    isRealModelLoadedRef.current = false;
+
+    let active = true;
+
+    // Determine target model URL: explicit prop or standard backend path
+    const resolvedUrl = modelUrl || (incidentId ? `http://localhost:8000/storage/models/${incidentId}.glb` : null);
+
+    if (!resolvedUrl) {
+      // No GLB available — always keep the procedural bridge visualization visible.
+      // Never blank the viewer just because no real reconstruction exists yet.
+      if (rootGroup) rootGroup.visible = true;
+      setModelStatus('loaded');
+      return;
+    }
+
+    setModelStatus('loading');
+
+    const loader = new GLTFLoader();
+    loader.load(
+      resolvedUrl,
+      (gltf) => {
+        if (!active) return;
+        // Hide demo bridge now that real model is loaded
+        if (rootGroup) rootGroup.visible = false;
+
+        const model = gltf.scene;
+        realGroup.add(model);
+        isRealModelLoadedRef.current = true;
+
+        // Enhance materials & ensure point clouds / meshes are sharp and visible
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const m = child as THREE.Mesh;
+            m.castShadow = true;
+            m.receiveShadow = true;
+            if (m.material) {
+              if (Array.isArray(m.material)) {
+                m.material.forEach((mat) => { mat.side = THREE.DoubleSide; });
+              } else {
+                m.material.side = THREE.DoubleSide;
+              }
+            }
+          } else if ((child as THREE.Points).isPoints) {
+            const pts = child as THREE.Points;
+            if (pts.material && (pts.material as THREE.PointsMaterial).size < 0.05) {
+              (pts.material as THREE.PointsMaterial).size = 0.15;
+            }
+          }
+        });
+
+        // Center model at origin & auto-fit camera based on bounding box
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        model.position.sub(center);
+
+        const maxDim = Math.max(size.x, size.y, size.z, 5);
+        const fov = camera.fov * (Math.PI / 180);
+        const cameraDist = Math.abs(maxDim / (2 * Math.tan(fov / 2))) * 1.5;
+
+        camera.position.set(cameraDist * 0.7, cameraDist * 0.5, cameraDist * 0.8);
+        camera.lookAt(0, 0, 0);
+        controls.target.set(0, 0, 0);
+        controls.maxDistance = Math.max(65, cameraDist * 4);
+        controls.update();
+
+        setModelStatus('loaded');
+      },
+      undefined,
+      () => {
+        if (!active) return;
+        // GLB failed to load — always fall back to the procedural bridge visualization.
+        // Never blank the viewer just because the backend model is unavailable.
+        if (rootGroup) rootGroup.visible = true;
+        setModelStatus('loaded');
+      }
+    );
+
+    return () => {
+      active = false;
+    };
+  }, [modelUrl, incidentId]);
+
+
+  // ── 3D ENTITY MARKER PINS — rebuild whenever data or filters change ─────────
+  // These are physical Three.js objects placed at each detection's 3D position.
+  // They move/rotate with the camera as you orbit, giving true spatial context.
+  useEffect(() => {
+    const group = markersGroupRef.current;
+    if (!group) return;
+
+    // Clear all previous pins
+    while (group.children.length > 0) {
+      const child = group.children[0];
+      // Dispose geometries + materials to avoid GPU leaks
+      child.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const m = obj as THREE.Mesh;
+          if (m.geometry) m.geometry.dispose();
+          if (Array.isArray(m.material)) m.material.forEach(mt => mt.dispose());
+          else if (m.material) (m.material as THREE.Material).dispose();
+        }
+      });
+      group.remove(child);
+    }
+
+    // Helper: determine if a system/platform marking is visible under current filters
+    const isPlatformVisible = (mk: CustomMarking): boolean => {
+      const f = filters;
+      const annType = (mk.annotationType || mk.type || '').toLowerCase();
+      const cat  = (mk.category || '').toLowerCase();
+      const name = (mk.name || '').toLowerCase();
+
+      // Per-entity override check first
+      if (f.platformMarkingToggles && mk.id in f.platformMarkingToggles) {
+        if (f.platformMarkingToggles[mk.id] === false) return false;
+      }
+
+      if (annType === 'peoples' || annType === 'person' || annType === 'human' ||
+          cat === 'humans' || cat === 'peoples' ||
+          name.includes('person') || name.includes('personnel') || name.includes('human'))
+        return f.humans;
+
+      if (annType === 'vehicles' || annType === 'vehicle' || annType === 'car' || annType === 'truck' ||
+          cat === 'vehicles' || name.includes('vehicle') || name.includes('car') || name.includes('truck'))
+        return f.vehicles;
+
+      if (annType === 'fire' || annType === 'smoke' || annType === 'hazard' ||
+          cat === 'firesmoke' || cat === 'fire' || cat === 'smoke' ||
+          name.includes('fire') || name.includes('smoke'))
+        return f.fireSmoke;
+
+      if (annType === 'damage' || cat === 'damage' ||
+          name.includes('damage') || name.includes('rubble') || name.includes('collapse'))
+        return f.damage;
+
+      if (annType === 'entry/exit points' || annType === 'entry point' || annType === 'exit point' ||
+          cat === 'entryexit' || cat === 'entry' || cat === 'exit' ||
+          name.includes('entry') || name.includes('exit') || name.includes('docheck') || name.includes('checkpoint'))
+        return f.entryExit;
+
+      return true; // fallback: show if not categorised
+    };
+
+    // Helper: build one 3D pin marker at the given world position
+    const buildPin = (
+      pos: [number, number, number],
+      hexColor: string,
+      isSystem: boolean,
+      isFire: boolean,
+    ) => {
+      const color = new THREE.Color(hexColor);
+      const pinGroup = new THREE.Group();
+      pinGroup.position.set(pos[0], pos[1], pos[2]);
+
+      const STEM_HEIGHT = isSystem ? 1.8 : 1.4;
+      const SPHERE_R    = isSystem ? 0.22 : 0.18;
+
+      // ── Vertical stem ──────────────────────────────────────────────────────
+      const stemGeo = new THREE.CylinderGeometry(0.03, 0.03, STEM_HEIGHT, 8);
+      const stemMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7 });
+      const stem = new THREE.Mesh(stemGeo, stemMat);
+      stem.position.y = STEM_HEIGHT / 2;
+      pinGroup.add(stem);
+
+      // ── Sphere head ────────────────────────────────────────────────────────
+      const sphereGeo = new THREE.SphereGeometry(SPHERE_R, 14, 14);
+      const sphereMat = new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: isFire ? 1.4 : 0.6,
+        roughness: 0.2,
+        metalness: 0.5,
+      });
+      const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+      sphere.position.y = STEM_HEIGHT + SPHERE_R;
+      pinGroup.add(sphere);
+
+      // ── Ground ring ────────────────────────────────────────────────────────
+      const ringGeo = new THREE.RingGeometry(0.3, 0.55, 24);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide,
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.01;
+      pinGroup.add(ring);
+
+      // ── Outer glow ring (larger, more transparent) ─────────────────────────
+      const glowRingGeo = new THREE.RingGeometry(0.55, 0.85, 24);
+      const glowRingMat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.12,
+        side: THREE.DoubleSide,
+      });
+      const glowRing = new THREE.Mesh(glowRingGeo, glowRingMat);
+      glowRing.rotation.x = -Math.PI / 2;
+      glowRing.position.y = 0.01;
+      pinGroup.add(glowRing);
+
+      // ── Fire entities get an extra point-light glow ────────────────────────
+      if (isFire) {
+        const ptLight = new THREE.PointLight(color, 3.0, 5);
+        ptLight.position.y = STEM_HEIGHT + SPHERE_R;
+        pinGroup.add(ptLight);
+      }
+
+      group.add(pinGroup);
+    };
+
+    // ── 1. Platform / system markings ─────────────────────────────────────────
+    const allPlatform = [...platformMarkings, ...markings.filter(m => m.isSystem)];
+    // Deduplicate by id
+    const platformMap = new Map<string, CustomMarking>();
+    allPlatform.forEach(m => platformMap.set(m.id, m));
+
+    platformMap.forEach((mk) => {
+      if (!isPlatformVisible(mk)) return;
+      const isFire = (mk.category === 'fireSmoke') ||
+        (mk.annotationType || '').toLowerCase().includes('fire') ||
+        (mk.name || '').toLowerCase().includes('fire');
+      buildPin(mk.position, mk.color, true, isFire);
+    });
+
+    // ── 2. User custom markings ────────────────────────────────────────────────
+    if (customMarkingsMaster) {
+      markings.filter(m => !m.isSystem).forEach((mk) => {
+        const indivOn = filters.customMarkings[mk.name] !== false && mk.visible !== false;
+        if (!indivOn) return;
+        buildPin(mk.position, mk.color, false, false);
+      });
+    }
+
+  }, [platformMarkings, markings, filters, customMarkingsMaster]);
 
 
   const getMarkerIcon = (type?: string, name?: string) => {
-    if (type === 'fire' || name?.includes('Fire')) return <Flame className="w-3.5 h-3.5 text-white" />;
-    if (type === 'warning' || name?.includes('Rubble')) return <AlertTriangle className="w-3.5 h-3.5 text-white" />;
-    if (type === 'shelter' || name?.includes('Shelter')) return <Home className="w-3.5 h-3.5 text-white" />;
-    if (type === 'mountain' || name?.includes('Mountain')) return <MountainIcon className="w-3.5 h-3.5 text-white" />;
-    if (type === 'water' || name?.includes('Water')) return <Droplets className="w-3.5 h-3.5 text-white" />;
-    if (type === 'boat' || name?.includes('Boat')) return <Anchor className="w-3.5 h-3.5 text-white" />;
-    if (name?.includes('Entry / Exit')) return <ArrowRight className="w-3.5 h-3.5 text-white" />;
-    if (name?.includes('Response Personnel')) return <Users className="w-3.5 h-3.5 text-white" />;
+    const t = (type || '').toLowerCase();
+    const n = (name || '').toLowerCase();
+    if (t === 'fire' || n.includes('fire')) return <Flame className="w-3.5 h-3.5 text-white" />;
+    if (t === 'smoke' || n.includes('smoke')) return <Flame className="w-3.5 h-3.5 text-white" />;
+    if (t === 'damage' || n.includes('damage') || n.includes('rubble') || n.includes('collapse')) return <AlertTriangle className="w-3.5 h-3.5 text-white" />;
+    if (t === 'shelter' || n.includes('shelter')) return <Home className="w-3.5 h-3.5 text-white" />;
+    if (t === 'mountain' || n.includes('mountain')) return <MountainIcon className="w-3.5 h-3.5 text-white" />;
+    if (t === 'water' || n.includes('water')) return <Droplets className="w-3.5 h-3.5 text-white" />;
+    if (t === 'boat' || n.includes('boat')) return <Anchor className="w-3.5 h-3.5 text-white" />;
+    if (t === 'entry/exit points' || t === 'entry point' || n.includes('entry') || n.includes('exit')) return <ArrowRight className="w-3.5 h-3.5 text-white" />;
+    if (t === 'peoples' || t === 'humans' || n.includes('person') || n.includes('personnel') || n.includes('people')) return <Users className="w-3.5 h-3.5 text-white" />;
+    if (t === 'vehicles' || n.includes('vehicle') || n.includes('car') || n.includes('truck')) return <MapPin className="w-3.5 h-3.5 text-white" />;
     return <MapPin className="w-3.5 h-3.5 text-white" />;
   };
 
@@ -1069,7 +1443,15 @@ export const BridgeViewer: React.FC<BridgeViewerProps> = ({
         </div>
       )}
 
-      {/* No backend HUD overlays — procedural bridge is always the display */}
+      {/* ── Status HUD: Real Reconstruction Loading or Empty State ────── */}
+      {modelStatus === 'loading' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#050811]/60 backdrop-blur-sm pointer-events-none z-20">
+          <Loader2 className="w-8 h-8 text-cyan-400 animate-spin mb-2" />
+          <p className="text-xs font-semibold text-cyan-300 tracking-wide">Loading 3D Photogrammetry Model…</p>
+        </div>
+      )}
+
+      {/* Small non-blocking status badge when real GLB is loading */}
 
       {/* Camera-Coupled Compass Rose (Top-Right) */}
       <div className="absolute top-3 right-3 pointer-events-none select-none z-30">

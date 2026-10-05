@@ -93,3 +93,27 @@
   transform-style: preserve-3d;
   will-change: transform;
 }
+
+/* Thin scrollbar for entity sidebar */
+.custom-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: #1a2c52;
+  border-radius: 9999px;
+}
+
+/* Floating marker badge animation */
+@keyframes floatBadge {
+  0%, 100% { transform: translateY(0) translateX(-50%); }
+  50% { transform: translateY(-4px) translateX(-50%); }
+}
+
+.animate-float {
+  animation: floatBadge 3s ease-in-out infinite;
+}

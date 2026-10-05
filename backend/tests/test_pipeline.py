@@ -43,7 +43,7 @@ def test_video_metadata_and_frame_extraction():
     rec_res = reconstruction_service.run_reconstruction(test_inc_id, frames)
     assert rec_res["success"] is True
     assert os.path.exists(rec_res["glb_abs_path"])
-    assert rec_res["quality"] in {"HIGH", "MEDIUM", "LOW", "INSUFFICIENT"}
+    assert rec_res["quality"] in {"HIGH", "MEDIUM", "LOW", "INSUFFICIENT", "HIGH_QUALITY", "MEDIUM_QUALITY", "LOW_QUALITY", "INSUFFICIENT_DATA"}
 
     # 5. Spatial Mapper (Ray/Pose 3D Placement)
     annotations = spatial_mapper.map_detections_to_3d(
@@ -53,6 +53,13 @@ def test_video_metadata_and_frame_extraction():
     )
     # If cameras are available, annotations are placed; if not, list is empty without random coordinates
     assert isinstance(annotations, list)
+    for ann in annotations:
+        assert "annotation_type" in ann
+        assert "label" in ann
+        assert "pos_x" in ann and "pos_y" in ann and "pos_z" in ann
+        assert ann["annotation_type"] in {
+            "Peoples", "Vehicles", "Fire", "Smoke", "Damage", "Entry/Exit Points", "3D Reconstruction"
+        }
 
     # 6. PDF Report Generator
     out_pdf = storage.get_report_path(test_inc_id)

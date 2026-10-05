@@ -1,16 +1,16 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Bell, ChevronDown, FileText, Download, User, Home as HomeIcon, Sparkles } from 'lucide-react';
+import { Bell, ChevronDown, FileText, Download, User, Home as HomeIcon, Sparkles, LogIn, LogOut, History } from 'lucide-react';
 import { useIncident } from '../context/IncidentContext';
 import { useAuth } from '../context/AuthContext';
 
 export const Navbar: React.FC = () => {
   const location = useLocation();
   const { incident, openReport, downloadReport } = useIncident();
-  const { user } = useAuth();
+  const { user, isAuthenticated, openLoginModal, logout } = useAuth();
   const path = location.pathname;
 
-  const displayName = user?.name ? user.name.split(' ')[0] : 'Keshav';
+  const displayName = user?.name ? user.name.split(' ')[0] : '';
   const isDashboard = path === '/dashboard' || path.startsWith('/analysis');
   const isNewAnalysis = path === '/new-analysis';
 
@@ -18,7 +18,7 @@ export const Navbar: React.FC = () => {
     <header className="sticky top-0 z-50 w-full bg-[#030712]/95 backdrop-blur-md border-b border-[#0f1d38]">
       <div className="max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         
-        {/* Brand Logo (Matching Screenshot 1 & 2) */}
+        {/* Brand Logo */}
         <div className="flex items-center gap-6">
           <Link to="/" className="flex items-center gap-2.5 group">
             {/* 3D Isometric Faceted Cube Logo */}
@@ -38,7 +38,7 @@ export const Navbar: React.FC = () => {
             </span>
           </Link>
 
-          {/* Dashboard Left Meta: Incident ID and Status Pill (Screenshot 2) */}
+          {/* Dashboard Left Meta */}
           {isDashboard && (
             <div className="flex items-center gap-3 pl-2">
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-[#081229] border border-[#162a56] text-xs">
@@ -54,10 +54,9 @@ export const Navbar: React.FC = () => {
           )}
         </div>
 
-        {/* Center Navigation Links: Home, About, Profile */}
+        {/* Center Navigation Links */}
         {!isDashboard && !isNewAnalysis && (
           <nav className="flex items-center gap-8">
-            {/* Home */}
             <Link
               to="/"
               className={`relative py-2 text-sm font-semibold transition-colors flex items-center gap-1.5 ${
@@ -71,7 +70,6 @@ export const Navbar: React.FC = () => {
               )}
             </Link>
 
-            {/* About */}
             <Link
               to="/about"
               className={`relative py-2 text-sm font-semibold transition-colors flex items-center gap-1.5 ${
@@ -84,19 +82,35 @@ export const Navbar: React.FC = () => {
               )}
             </Link>
 
-            {/* Profile */}
-            <Link
-              to="/profile"
-              className={`relative py-2 text-sm font-semibold transition-colors flex items-center gap-1.5 ${
-                path === '/profile' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <User className="w-4 h-4" />
-              <span>Profile</span>
-              {path === '/profile' && (
-                <div className="absolute bottom-[-16px] left-0 right-0 h-[2.5px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_12px_#00d2ff,0_0_24px_#2563eb]" />
-              )}
-            </Link>
+            {isAuthenticated && (
+              <Link
+                to="/history"
+                className={`relative py-2 text-sm font-semibold transition-colors flex items-center gap-1.5 ${
+                  path === '/history' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <History className="w-4 h-4" />
+                <span>History</span>
+                {path === '/history' && (
+                  <div className="absolute bottom-[-16px] left-0 right-0 h-[2.5px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_12px_#00d2ff,0_0_24px_#2563eb]" />
+                )}
+              </Link>
+            )}
+
+            {isAuthenticated && (
+              <Link
+                to="/profile"
+                className={`relative py-2 text-sm font-semibold transition-colors flex items-center gap-1.5 ${
+                  path === '/profile' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <User className="w-4 h-4" />
+                <span>Profile</span>
+                {path === '/profile' && (
+                  <div className="absolute bottom-[-16px] left-0 right-0 h-[2.5px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_12px_#00d2ff,0_0_24px_#2563eb]" />
+                )}
+              </Link>
+            )}
           </nav>
         )}
 
@@ -120,20 +134,22 @@ export const Navbar: React.FC = () => {
               <div className="absolute bottom-[-16px] left-0 right-0 h-[2.5px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_12px_#00d2ff]" />
             </Link>
 
-            <Link
-              to="/profile"
-              className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors"
-            >
-              <User className="w-3.5 h-3.5" />
-              <span>Profile</span>
-            </Link>
+            {isAuthenticated && (
+              <Link
+                to="/profile"
+                className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Profile</span>
+              </Link>
+            )}
           </nav>
         )}
 
         {/* Right Section: Actions & User Avatar */}
         <div className="flex items-center gap-3">
           {isDashboard ? (
-            /* Screenshot 2 Header: Analysis Report & Download Report Functional Buttons */
+            /* Dashboard Header: Analysis Report & Download Report */
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -163,11 +179,11 @@ export const Navbar: React.FC = () => {
                 <User className="w-4 h-4" />
               </Link>
             </div>
-          ) : (
-            /* Screenshot 1 Header: Bell and Keshav User Pill */
+          ) : isAuthenticated ? (
+            /* Authenticated User Pill */
             <div className="flex items-center gap-3">
-              <button 
-                type="button" 
+              <button
+                type="button"
                 className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-[#0c1630] transition-colors relative"
                 title="Notifications"
               >
@@ -180,12 +196,32 @@ export const Navbar: React.FC = () => {
                 className="flex items-center gap-2 pl-2 pr-3 py-1 rounded-full bg-[#0a142c] border border-[#1a2d59] hover:border-cyan-500/40 transition-colors"
               >
                 <div className="w-6 h-6 rounded-full bg-blue-600/40 border border-cyan-400/50 flex items-center justify-center text-cyan-300 font-bold text-xs">
-                  <User className="w-3.5 h-3.5" />
+                  {displayName.charAt(0).toUpperCase() || <User className="w-3.5 h-3.5" />}
                 </div>
                 <span className="text-xs font-semibold text-slate-200">{displayName}</span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
               </Link>
+
+              <button
+                type="button"
+                onClick={() => logout()}
+                title="Sign Out"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0a142c] border border-[#1a2d59] hover:border-rose-500/40 hover:text-rose-300 text-slate-400 text-xs font-semibold transition-all cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
             </div>
+          ) : (
+            /* Not Authenticated — Sign In Button */
+            <button
+              type="button"
+              onClick={openLoginModal}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white text-sm font-bold shadow-[0_0_20px_rgba(0,210,255,0.3)] hover:shadow-[0_0_30px_rgba(0,210,255,0.5)] transition-all cursor-pointer"
+            >
+              <LogIn className="w-4 h-4" />
+              Sign In
+            </button>
           )}
         </div>
 

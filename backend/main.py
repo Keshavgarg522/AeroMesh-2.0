@@ -41,7 +41,8 @@ os.makedirs(storage_abs_path, exist_ok=True)
 app.mount("/storage", StaticFiles(directory=storage_abs_path), name="storage")
 
 # Include Routers
-app.include_router(auth_routes.router)
+app.include_router(auth_routes.router, prefix="/api/auth")
+app.include_router(auth_routes.router, prefix="/auth")
 app.include_router(incident_routes.router)
 
 @app.get("/api/health")
